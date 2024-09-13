@@ -15,9 +15,9 @@ use did_peer::peer_did::{numalgos::numalgo4::Numalgo4, PeerDid};
 use did_resolver_registry::ResolverRegistry;
 
 use crate::{
+    error::VCXFrameworkResult,
     framework::{EventEmitter, FrameworkConfig},
     transports::{TransportProtocol, TransportRegistry, PREFERRED_PROTOCOL_ORDER},
-    VCXFrameworkResult,
 };
 
 pub struct MessagingService {

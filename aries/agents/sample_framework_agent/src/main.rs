@@ -1,15 +1,16 @@
 #![deny(clippy::unwrap_used)]
 
-use std::{error::Error, thread};
+use std::thread;
 
 use aries_framework_vcx::{
     aries_vcx::handlers::out_of_band::receiver::OutOfBandReceiver,
     connection_service::ConnectionServiceConfig,
+    error::VCXFrameworkError,
     framework::{
         AriesFrameworkVCX, EventEmitter, FrameworkConfig, DEFAULT_ASKAR_KEY_METHOD,
         DEFAULT_WALLET_PROFILE, IN_MEMORY_DB_URL,
     },
-    AskarWalletConfig, Url, VCXFrameworkError,
+    AskarWalletConfig, Url,
 };
 use log::{debug, info};
 

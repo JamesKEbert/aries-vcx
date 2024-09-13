@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use url::Url;
 
-use crate::VCXFrameworkResult;
+use crate::error::VCXFrameworkResult;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TransportProtocol {
