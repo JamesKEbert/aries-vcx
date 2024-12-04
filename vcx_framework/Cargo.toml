@@ -1,0 +1,24 @@
+[package]
+name = "vcx_framework"
+version.workspace = true
+authors.workspace = true
+description = "A framework to provide a simple and easy to use system for using VCX"
+license.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+aries_vcx = { path = "../aries/aries_vcx", features = [
+  "anoncreds",
+  "askar_wallet",
+] }
+env_logger = "0.11.5"
+uuid = { version = "1.11.0", features = [
+  "v4",                # Lets you generate random UUIDs
+  "fast-rng",          # Use a faster (but still sufficiently random) RNG
+  "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
+] }
+
+[lints]
+workspace = true
