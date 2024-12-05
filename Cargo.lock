@@ -519,7 +519,7 @@ dependencies = [
  "clap 4.5.9",
  "derive_more",
  "display_as_json",
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "log",
  "rand 0.8.5",
  "reqwest 0.12.7",
@@ -537,7 +537,7 @@ dependencies = [
  "async-trait",
  "did_peer",
  "did_resolver_registry",
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "log",
  "reqwest 0.12.7",
  "serde",
@@ -570,7 +570,7 @@ dependencies = [
  "did_resolver_registry",
  "did_resolver_sov",
  "diddoc_legacy",
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "futures",
  "lazy_static",
  "log",
@@ -1921,7 +1921,7 @@ dependencies = [
  "did_key",
  "did_parser_nom",
  "display_as_json",
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "hex",
  "log",
  "multibase",
@@ -1951,7 +1951,7 @@ dependencies = [
 name = "did_parser_nom"
 version = "0.1.0"
 dependencies = [
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "log",
  "nom",
  "serde",
@@ -1969,7 +1969,7 @@ dependencies = [
  "did_parser_nom",
  "did_resolver",
  "display_as_json",
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "log",
  "multibase",
  "once_cell",
@@ -2278,9 +2278,9 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.11.3"
+version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38b35839ba51819680ba087cd351788c9a3c476841207e0b8cee0b04722343b9"
+checksum = "e13fa619b91fb2381732789fc5de83b45675e882f66623b7d8cb4f643017018d"
 dependencies = [
  "anstream",
  "anstyle",
@@ -3637,7 +3637,7 @@ dependencies = [
  "chrono",
  "diddoc_legacy",
  "dotenvy",
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "futures",
  "log",
  "messages",
@@ -4824,7 +4824,7 @@ name = "sample_framework_agent"
 version = "0.1.0"
 dependencies = [
  "aries_framework_vcx",
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "log",
  "tokio",
 ]
@@ -5591,7 +5591,7 @@ version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dffced63c2b5c7be278154d76b479f9f9920ed34e7574201407f0b14e2bbb93"
 dependencies = [
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "test-log-macros",
  "tracing-subscriber",
 ]
@@ -5618,7 +5618,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "did_parser_nom",
- "env_logger 0.11.3",
+ "env_logger 0.11.5",
  "indy-ledger-response-parser",
  "indy-vdr-proxy-client",
  "lazy_static",
@@ -6260,13 +6260,25 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.10.0"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81dfa00651efa65069b0b6b651f4aaa31ba9e3c3ce0137aaad053604ee7e0314"
+checksum = "f8c5f0a0af699448548ad1a2fbf920fb4bee257eae39953ba95cb84891a0446a"
 dependencies = [
  "getrandom 0.2.15",
  "rand 0.8.5",
  "serde",
+ "uuid-macro-internal",
+]
+
+[[package]]
+name = "uuid-macro-internal"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b91f57fe13a38d0ce9e28a03463d8d3c2468ed03d75375110ec71d93b449a08"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.72",
 ]
 
 [[package]]
@@ -6286,6 +6298,15 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "vcx_framework"
+version = "0.65.0"
+dependencies = [
+ "aries_vcx",
+ "env_logger 0.11.5",
+ "uuid",
+]
 
 [[package]]
 name = "version_check"
