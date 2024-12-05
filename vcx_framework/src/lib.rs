@@ -38,6 +38,7 @@ pub mod storage {
     use std::{
         collections::HashMap,
         fmt::{Display, Formatter},
+        marker::{self, PhantomData},
     };
 
     use uuid::Uuid;
@@ -61,51 +62,83 @@ pub mod storage {
         }
     }
 
-    pub type Record = String;
+    pub trait VCXFrameworkStorage<I, R: Record> {
+        /// Adds a record to the storage by id. Will not update an existing record with the same id, otherwise use [`add_or_update_record()`] instead.
+        fn add_record(&mut self, id: I, record: R) -> Result<(), StorageError>;
 
-    pub trait VCXFrameworkStorage<I> {
-        fn add_record(&mut self, id: I, record: Record) -> Result<(), StorageError>;
-        fn add_or_update_record(&mut self, id: I, record: Record) -> Result<(), StorageError>;
-        fn update_record(&mut self, id: I, record: Record) -> Result<(), StorageError>;
-        fn get_record(&self, id: I) -> Result<Option<Record>, StorageError>;
+        /// Adds or updates an existing record by id to the storage.
+        fn add_or_update_record(&mut self, id: I, record: R) -> Result<(), StorageError>;
+
+        /// Updates a record in the storage. Will not update a non existent record. To update or create if non-existent, use [`add_or_update_record()`] instead.
+        fn update_record(&mut self, id: I, record: R) -> Result<(), StorageError>;
+
+        /// Gets a record from the storage by id if it exists.
+        fn get_record(&self, id: I) -> Result<Option<R>, StorageError>;
+
+        /// Deletes a record from the storage by id.
         fn delete_record(&mut self, id: I) -> Result<(), StorageError>;
     }
 
-    struct InMemoryStorage {
-        records: HashMap<Uuid, Record>,
+    pub trait Record {
+        fn to_string(&self) -> String;
+        fn from_string(string: String) -> Self;
     }
 
-    impl InMemoryStorage {
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct SimpleRecord {
+        value: String,
+    }
+
+    impl Record for SimpleRecord {
+        fn to_string(&self) -> String {
+            self.value.to_string()
+        }
+        fn from_string(string: String) -> Self {
+            Self { value: string }
+        }
+    }
+
+    struct InMemoryStorage<R: Record> {
+        records: HashMap<Uuid, String>,
+        _phantom: PhantomData<R>,
+    }
+
+    impl<R: Record> InMemoryStorage<R> {
         fn new() -> Self {
-            InMemoryStorage {
+            InMemoryStorage::<R> {
                 records: HashMap::new(),
+                _phantom: PhantomData,
             }
         }
     }
 
-    impl VCXFrameworkStorage<Uuid> for InMemoryStorage {
-        fn add_record(&mut self, id: Uuid, record: Record) -> Result<(), StorageError> {
+    impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
+        fn add_record(&mut self, id: Uuid, record: R) -> Result<(), StorageError> {
             if self.records.contains_key(&id.clone()) {
                 return Err(StorageError::DuplicateRecord);
             } else {
-                self.records.insert(id, record);
+                self.records.insert(id, record.to_string());
             }
             Ok(())
         }
-        fn add_or_update_record(&mut self, id: Uuid, record: Record) -> Result<(), StorageError> {
-            self.records.insert(id, record);
+        fn add_or_update_record(&mut self, id: Uuid, record: R) -> Result<(), StorageError> {
+            self.records.insert(id, record.to_string());
             Ok(())
         }
-        fn update_record(&mut self, id: Uuid, record: Record) -> Result<(), StorageError> {
+        fn update_record(&mut self, id: Uuid, record: R) -> Result<(), StorageError> {
             if self.records.contains_key(&id.clone()) {
-                self.records.insert(id, record);
+                self.records.insert(id, record.to_string());
                 Ok(())
             } else {
                 return Err(StorageError::RecordDoesNotExist);
             }
         }
-        fn get_record(&self, id: Uuid) -> Result<Option<Record>, StorageError> {
-            Ok(self.records.get(&id).cloned())
+        fn get_record(&self, id: Uuid) -> Result<Option<R>, StorageError> {
+            let record = self.records.get(&id);
+            match record {
+                Some(retrieved_record) => Ok(Some(R::from_string(retrieved_record.to_owned()))),
+                None => Ok(None),
+            }
         }
         fn delete_record(&mut self, id: Uuid) -> Result<(), StorageError> {
             self.records.remove(&id);
@@ -123,10 +156,13 @@ pub mod storage {
         fn test_add_and_read_record() {
             test_init();
             let mut in_memory_storage = InMemoryStorage::new();
-            let record: Record = "Foo".to_owned();
+            let record = SimpleRecord {
+                value: "Foo".to_owned(),
+            };
             let id = Uuid::new_v4();
+
             let _ = in_memory_storage.add_record(id, record.clone());
-            let retrieved_record: Record = in_memory_storage
+            let retrieved_record = in_memory_storage
                 .get_record(id)
                 .unwrap()
                 .expect("Record to exist");
@@ -137,7 +173,9 @@ pub mod storage {
         fn test_add_duplicate() {
             test_init();
             let mut in_memory_storage = InMemoryStorage::new();
-            let record: Record = "Foo".to_owned();
+            let record = SimpleRecord {
+                value: "Foo".to_owned(),
+            };
             let id = Uuid::new_v4();
             let _ = in_memory_storage.add_record(id, record.clone());
             assert_eq!(
@@ -150,10 +188,12 @@ pub mod storage {
         fn test_add_or_update_record() {
             test_init();
             let mut in_memory_storage = InMemoryStorage::new();
-            let record: Record = "Foo".to_owned();
+            let record = SimpleRecord {
+                value: "Foo".to_owned(),
+            };
             let id = Uuid::new_v4();
             let _ = in_memory_storage.add_or_update_record(id, record.clone());
-            let retrieved_record: Record = in_memory_storage
+            let retrieved_record = in_memory_storage
                 .get_record(id)
                 .unwrap()
                 .expect("Record to exist");
@@ -164,12 +204,16 @@ pub mod storage {
         fn test_update_record() {
             test_init();
             let mut in_memory_storage = InMemoryStorage::new();
-            let record: Record = "Foo".to_owned();
-            let updated_record: Record = "Foo".to_owned();
+            let record = SimpleRecord {
+                value: "Foo".to_owned(),
+            };
+            let updated_record = SimpleRecord {
+                value: "Foo2".to_owned(),
+            };
             let id = Uuid::new_v4();
             let _ = in_memory_storage.add_record(id, record.clone());
             let _ = in_memory_storage.update_record(id, updated_record.clone());
-            let retrieved_record: Record = in_memory_storage
+            let retrieved_record = in_memory_storage
                 .get_record(id)
                 .unwrap()
                 .expect("Record to exist");
@@ -180,7 +224,9 @@ pub mod storage {
         fn test_update_record_no_record() {
             test_init();
             let mut in_memory_storage = InMemoryStorage::new();
-            let updated_record: Record = "Foo".to_owned();
+            let updated_record = SimpleRecord {
+                value: "Foo2".to_owned(),
+            };
             let id = Uuid::new_v4();
 
             assert_eq!(
@@ -193,10 +239,14 @@ pub mod storage {
         fn test_delete_record() {
             test_init();
             let mut in_memory_storage = InMemoryStorage::new();
-            let record: Record = "Foo".to_owned();
+            let record = SimpleRecord {
+                value: "Foo".to_owned(),
+            };
             let id = Uuid::new_v4();
             let _ = in_memory_storage.add_record(id, record.clone());
-            let _ = in_memory_storage.delete_record(id);
+            let _ = in_memory_storage
+                .delete_record(id)
+                .expect("To delete record");
             assert_eq!(None, in_memory_storage.get_record(id).unwrap());
         }
 
@@ -204,9 +254,12 @@ pub mod storage {
         fn test_delete_record_already_deleted() {
             test_init();
             let mut in_memory_storage = InMemoryStorage::new();
-            let record: Record = "Foo".to_owned();
+            let record = SimpleRecord {
+                value: "Foo".to_owned(),
+            };
             let id = Uuid::new_v4();
             let _ = in_memory_storage.add_record(id, record.clone());
+            let _ = in_memory_storage.delete_record(id);
             let _ = in_memory_storage.delete_record(id);
             assert_eq!(None, in_memory_storage.get_record(id).unwrap());
         }
