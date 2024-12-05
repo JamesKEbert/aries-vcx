@@ -14,16 +14,16 @@ The VCX Framework is comprised of `Modules`, `Services`, and `Registries`:
 
 - Events Service -- a service that emits events and holds loose references to listeners, and so therefore must be a service.
 
-> May not be necessary if individual registries / services manage their individual events. Additionally separating may reduce coupling between modules (increasing flexibility), but could introduce fragmentation is approach or implementation. -- additional thoughts: having the registry manage their individual events would require any event to have a corresponding state update, which for instance, errors may not have. Additionally, not all modules may have a registry where there is not persistant data being handled for the module in the framework. Additionally, the simplicity from the end-dev-consumer POV to work with an individual service for all events is appealing (especially given that it can be completely flexible in the data contained within the events). Additionally, the registry could also trigger events on CRUD operations via the Event Service, but is not the only place events can be triggered (events could be triggered via the module as well that are not CRUD specific, theoretically). - @JamesKEbert
+> May not be necessary if individual registries / services manage their individual events. Additionally separating may reduce coupling between modules (increasing flexibility), but could introduce fragmentation is approach or implementation. -- additional thoughts: having the registry manage their individual events would require any event to have a corresponding state update, which for instance, errors may not have. Additionally, not all modules may have a registry where there is not persistant data being handled for the module in the framework. Additionally, the simplicity from the end-dev-consumer POV to work with an individual service for all events is appealing (especially given that it can be completely flexible in the data contained within the events). Additionally, the registry could also trigger events on CRUD operations via the Event Service, but is not the only place events can be triggered (events could be triggered via the module as well that are not CRUD specific, theoretically). - @jameskebert
 
 - Transport Service -- a service that manages inbound / outbound transport handles -- HTTP handlers, WS managers, etc. These are references held in memory and therefore must be a service.
 - Mediator Service -- a service that manages the pickup relationship with mediators as this is a long-running task.
-  > Possibly might not need to be a service, will need implementation/additional thought to determine - @JamesKEbert
+  > Possibly might not need to be a service, will need implementation/additional thought to determine - @jameskebert
 
 ### Modules
 
 - Messaging Module -- a module that provides the functionality for sending and receiving messages.
-  > This potentially could require being a service due to HTTP response behaviors (needing to be able to send a message back in response to an HTTP message via DIDComm return route mechanisms rather than via the standard approach of a completely new outbound message) - @JamesKEbert
+  > This potentially could require being a service due to HTTP response behaviors (needing to be able to send a message back in response to an HTTP message via DIDComm return route mechanisms rather than via the standard approach of a completely new outbound message) - @jameskebert
 - Connection Module -- a module that cooridinates the behavior of connecting via DIDComm to another DIDComm agent.
 - Mediation Module -- a module that cooridinates behaviors and relationships with mediators for the purposes of DIDComm connections and inbound message delivery.
 
@@ -52,5 +52,13 @@ The VCX Framework is comprised of `Modules`, `Services`, and `Registries`:
 
 What are VCX Framework's error handling goals:
 
-- Specific - any given error must have a corresponding code/identifier such that an end user could provide the code and a developer could identify specifically where the issue occurred, but the code may not provide the relevant details as to WHY the error occurred, as those details may be context-specific.
-- Easy to use - using and defining errors must be easy, otherwise it just won't be used, which is worse.
+- Specific - any given error must have a corresponding code/identifier such that an end user could provide the code and a developer could identify specifically where the issue occurred.
+- Errors should be statically defined - **DON'T** allow generic error messages to be supplied, as it's much harder for end-developers to handle all error cases, as they cannot `Match()` errors by dynamic messages. **DO** define errors as `enum`s to enable matching
+- The Framework should handle any dependency errors and then if appropriate provide a Framework specific error -- "Couldn't deserialize json" Serde dependency error gets handled/mapped and returned as "Couldn't process inbound DIDComm message" Framework error.
+
+### Error Types:
+
+- VCXFrameworkError -- A VCXFrameworkError is an error that generally is related to the action the end-developer was attempting to perform, such as connecting, issuance, etc ("Error connecting"). If a method or function is callable by end-developers, it should return a `VCXFrameworkError`. Given the open-ended, flexible nature of the framework, most `Modules` are likely to return `VCXFrameworkError`s over internal dependency errors.
+- Dependency errors -- Dependency errors are errors stemming from dependencies, such as UUID, Serde, etc. These errors should be handled and mapped to `VCXFrameworkError`s wherever possible. The thought process here is that the framework should first indicate what action failed, with the causes determinable via the stack trace. For instance, an error of 'Serde deserialization failed' does not give a developer context as to what the issue is, while rather "Failed to deserialize inbound DIDComm message" does provide the necessary context.
+
+> This architectural approach for error handling may need further adjustment as development on the framework progresses - @jameskebert
