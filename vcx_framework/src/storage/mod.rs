@@ -126,7 +126,12 @@ impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
 pub mod did_registry {
     use super::{SimpleRecord, VCXFrameworkStorage};
 
-    /// The `DIDRegistry` stores all created and known DIDs, and where appropriate, stores full DIDDocs (such as in some DID Peer scenarios or via a TTL resolution cache).
+    struct DIDRecord {
+        // I would prefer to have this be an actual DID type in the future, but that'll take work on the did_core crates - @JamesKEbert
+        did: String,
+    }
+
+    /// The `DIDRegistry` stores all created and known DIDs, and where appropriate, stores full DIDDocs (such as storing a long form did:peer:4 or with TTL caching strategies).
     /// Otherwise, DID resolution should be done at runtime.
     struct DidRegistry<S: VCXFrameworkStorage<String, SimpleRecord>> {
         store: S,
@@ -136,6 +141,8 @@ pub mod did_registry {
         fn new(store: S) -> Self {
             Self { store }
         }
+
+        fn get_did_record(did: String) -> DIDRecord {}
     }
 }
 
