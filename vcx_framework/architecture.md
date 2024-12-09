@@ -22,7 +22,7 @@ The VCX Framework is comprised of `Modules`, `Services`, and `Registries`:
 
 ### Modules
 
-- Messaging Module -- a module that provides the functionality for sending and receiving messages.
+- Messaging Module -- a module that provides the functionality for sending and receiving DIDComm messages, including encryption and decryption.
   > This potentially could require being a service due to HTTP response behaviors (needing to be able to send a message back in response to an HTTP message via DIDComm return route mechanisms rather than via the standard approach of a completely new outbound message) - @jameskebert
 - Connection Module -- a module that cooridinates the behavior of connecting via DIDComm to another DIDComm agent.
 - Mediation Module -- a module that cooridinates behaviors and relationships with mediators for the purposes of DIDComm connections and inbound message delivery.
@@ -54,7 +54,7 @@ What are VCX Framework's error handling goals:
 
 - Specific - any given error must have a corresponding code/identifier such that an end user could provide the code and a developer could identify specifically where the issue occurred.
 - Errors should be statically defined - **DON'T** allow generic error messages to be supplied, as it's much harder for end-developers to handle all error cases, as they cannot `Match()` errors by dynamic messages. **DO** define errors as `enum`s to enable matching
-- The Framework should handle any dependency errors and then if appropriate provide a Framework specific error -- "Couldn't deserialize json" Serde dependency error gets handled/mapped and returned as "Couldn't process inbound DIDComm message" Framework error.
+- The Framework should handle any dependency errors and then if appropriate provide a Framework specific error -- "Couldn't deserialize json" Serde dependency error gets handled/mapped and returned as "Couldn't process inbound DIDComm message" Framework error. Additionally, the original source of the error can be retrieved via .source(). This provides a powerful way of providing context to the original issue, without just blindly wrapping and passing all errors up the chain.
 
 ### Error Types:
 
