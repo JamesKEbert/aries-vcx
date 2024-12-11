@@ -48,6 +48,9 @@ pub trait VCXFrameworkStorage<I, R: Record> {
     /// Gets a record from the storage by id if it exists.
     fn get_record(&self, id: I) -> Result<Option<R>, StorageError>;
 
+    /// Gets all records from the storage. Pagination TODO
+    fn get_all_records(&self) -> Result<Vec<R>, StorageError>;
+
     /// Deletes a record from the storage by id.
     fn delete_record(&mut self, id: I) -> Result<(), StorageError>;
 }
@@ -116,6 +119,16 @@ impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
             None => Ok(None),
         }
     }
+
+    fn get_all_records(&self) -> Result<Vec<R>, StorageError> {
+        let records = self
+            .records
+            .iter()
+            .map(|(_id, retrieved_record)| R::from_string(retrieved_record.to_owned()))
+            .collect();
+        Ok(records)
+    }
+
     fn delete_record(&mut self, id: Uuid) -> Result<(), StorageError> {
         self.records.remove(&id);
         Ok(())
@@ -142,7 +155,7 @@ pub mod did_registry {
             Self { store }
         }
 
-        fn get_did_record(did: String) -> DIDRecord {}
+        // fn get_did_record(did: String) -> DIDRecord {}
     }
 }
 
