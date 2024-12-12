@@ -3,7 +3,7 @@ pub mod error {
 
     use crate::storage::StorageError;
 
-    #[derive(Debug, Clone, Copy, PartialEq)]
+    #[derive(Debug)]
     pub enum VCXFrameworkError {
         Storage(StorageError),
     }
