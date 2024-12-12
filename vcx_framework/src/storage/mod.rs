@@ -26,10 +26,10 @@ impl Display for StorageError {
                 write!(f, "Record does not exist")
             }
             StorageError::Serialization(_err) => {
-                write!(f, "Error Serializing Record")
+                write!(f, "Error serializing record")
             }
             StorageError::Deserialization(_err) => {
-                write!(f, "Error Deserializing record")
+                write!(f, "Error deserializing record")
             }
         }
     }
@@ -60,11 +60,11 @@ pub trait VCXFrameworkStorage<I, R: Record> {
     fn get_record(&self, id: I) -> Result<Option<R>, StorageError>;
 
     // TODO: Pagination
-    /// Gets all records from the storage. Pagination TODO
+    /// Gets all records from the storage. Pagination not yet implemented
     fn get_all_records(&self) -> Result<Vec<R>, StorageError>;
 
     // TODO: Pagination
-    // Searches all records in the storage by a given tag key and tag value. Pagination TODO
+    // Searches all records in the storage by a given tag key and tag value. Pagination not yet implemented
     fn search_records(&self, tag_key: &str, tag_value: &str) -> Result<Vec<R>, StorageError>;
 
     /// Deletes a record from the storage by id.
@@ -227,8 +227,8 @@ impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
     }
 }
 
-#[cfg(feature = "did_registry")]
-pub mod did_registry {
+#[cfg(feature = "did_repository")]
+pub mod did_repository {
     use super::{SimpleRecord, VCXFrameworkStorage};
 
     struct DIDRecord {
@@ -236,13 +236,13 @@ pub mod did_registry {
         did: String,
     }
 
-    /// The `DIDRegistry` stores all created and known DIDs, and where appropriate, stores full DIDDocs (such as storing a long form did:peer:4 or with TTL caching strategies).
+    /// The `DidRepository` stores all created and known DIDs, and where appropriate, stores full DIDDocs (such as storing a long form did:peer:4 or with TTL caching strategies).
     /// Otherwise, DID resolution should be done at runtime.
-    struct DidRegistry<S: VCXFrameworkStorage<String, SimpleRecord>> {
+    struct DidRepository<S: VCXFrameworkStorage<String, SimpleRecord>> {
         store: S,
     }
 
-    impl<S: VCXFrameworkStorage<String, SimpleRecord>> DidRegistry<S> {
+    impl<S: VCXFrameworkStorage<String, SimpleRecord>> DidRepository<S> {
         fn new(store: S) -> Self {
             Self { store }
         }
