@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate log;
+
 pub mod error {
     use std::fmt::{Display, Formatter};
 

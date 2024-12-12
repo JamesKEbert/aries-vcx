@@ -5,7 +5,7 @@ use std::{
     marker::PhantomData,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -46,64 +46,54 @@ impl error::Error for StorageError {
 }
 
 /// This trait provides a general purpose storage trait that provides CRUD style operations that correspond to a generic [`Record`].
-pub trait VCXFrameworkStorage<I, R: Record> {
+pub trait VCXFrameworkStorage<I, D: Serialize + DeserializeOwned> {
     /// Adds a record to the storage by id. Will not update an existing record with the same id, otherwise use [`add_or_update_record()`] instead.
-    fn add_record(&mut self, id: I, record: R) -> Result<(), StorageError>;
+    fn add_record(&mut self, id: I, record: Record<D>) -> Result<(), StorageError>;
 
     /// Adds or updates an existing record by id to the storage.
-    fn add_or_update_record(&mut self, id: I, record: R) -> Result<(), StorageError>;
+    fn add_or_update_record(&mut self, id: I, record: Record<D>) -> Result<(), StorageError>;
 
     /// Updates a record in the storage. Will not update a non existent record. To update or create if non-existent, use [`add_or_update_record()`] instead.
-    fn update_record(&mut self, id: I, record: R) -> Result<(), StorageError>;
+    fn update_record(&mut self, id: I, record: Record<D>) -> Result<(), StorageError>;
 
     /// Gets a record from the storage by id if it exists.
-    fn get_record(&self, id: I) -> Result<Option<R>, StorageError>;
+    fn get_record(&self, id: I) -> Result<Option<Record<D>>, StorageError>;
 
     // TODO: Pagination
     /// Gets all records from the storage. Pagination not yet implemented
-    fn get_all_records(&self) -> Result<Vec<R>, StorageError>;
+    fn get_all_records(&self) -> Result<Vec<Record<D>>, StorageError>;
 
     // TODO: Pagination
     // Searches all records in the storage by a given tag key and tag value. Pagination not yet implemented
-    fn search_records(&self, tag_key: &str, tag_value: &str) -> Result<Vec<R>, StorageError>;
+    fn search_records(
+        &self,
+        tag_key: &str,
+        tag_value: &str,
+    ) -> Result<Vec<Record<D>>, StorageError>;
 
     /// Deletes a record from the storage by id.
     fn delete_record(&mut self, id: I) -> Result<(), StorageError>;
 }
 
-/// A generic Record trait for use with [`VCXFrameworkStorage`], which must be able to serialize and deserialize from and to a String,
-/// as well as provide methods for getting, updating, and deleting record tags. Tags are used for querying records by metadata, etc.
-pub trait Record {
-    fn to_string(&self) -> Result<String, StorageError>;
-    fn from_string(string: &str) -> Result<Self, StorageError>
-    where
-        Self: Sized;
-    fn get_tag(&self, tag_key: &str) -> Option<&String>;
-    fn get_tags(&self) -> &HashMap<String, String>;
-    fn add_or_update_tag(&mut self, tag_key: String, tag_value: String) -> ();
-    fn delete_tag(&mut self, tag_key: &str) -> ();
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SimpleRecord {
-    value: String,
+/// A general-purpose Record that takes generic data for use with [`VCXFrameworkStorage`]. The record provides methods for serializing from and deserializing to a String,
+/// and for getting, updating, and deleting record tags. Tags are used for querying records by metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Record<D> {
+    data: D,
     tags: HashMap<String, String>,
 }
 
-impl SimpleRecord {
-    fn new(value: String, tags: Vec<(String, String)>) -> Self {
+impl<D: Serialize + DeserializeOwned> Record<D> {
+    fn new(data: D, tags: Vec<(String, String)>) -> Self {
         let mut tags_map = HashMap::new();
         for (tag_key, tag_value) in tags {
             tags_map.insert(tag_key, tag_value);
         }
         Self {
-            value,
+            data,
             tags: tags_map,
         }
     }
-}
-
-impl Record for SimpleRecord {
     fn to_string(&self) -> Result<String, StorageError> {
         serde_json::to_string(self).map_err(|err| StorageError::Serialization(err))
     }
@@ -124,17 +114,17 @@ impl Record for SimpleRecord {
     }
 }
 
-struct InMemoryStorage<R: Record> {
+struct InMemoryStorage<D: Serialize + DeserializeOwned> {
     records: HashMap<Uuid, String>,
     tags: Vec<(String, (String, Uuid))>,
     // PhantomData is used so that the Record type must be determined at `new()`, which is required given that the Record type isn't specified in any of the struct fields.
     // This is done so that the type doesn't have to be inferred or manually set later during use.
-    _phantom: PhantomData<R>,
+    _phantom: PhantomData<D>,
 }
 
-impl<R: Record> InMemoryStorage<R> {
+impl<D: Serialize + DeserializeOwned> InMemoryStorage<D> {
     fn new() -> Self {
-        InMemoryStorage::<R> {
+        InMemoryStorage::<D> {
             records: HashMap::new(),
             tags: vec![],
             _phantom: PhantomData,
@@ -142,8 +132,8 @@ impl<R: Record> InMemoryStorage<R> {
     }
 }
 
-impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
-    fn add_record(&mut self, id: Uuid, record: R) -> Result<(), StorageError> {
+impl<D: Serialize + DeserializeOwned> VCXFrameworkStorage<Uuid, D> for InMemoryStorage<D> {
+    fn add_record(&mut self, id: Uuid, record: Record<D>) -> Result<(), StorageError> {
         if self.records.contains_key(&id.clone()) {
             return Err(StorageError::DuplicateRecord);
         } else {
@@ -155,7 +145,7 @@ impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
         }
         Ok(())
     }
-    fn add_or_update_record(&mut self, id: Uuid, record: R) -> Result<(), StorageError> {
+    fn add_or_update_record(&mut self, id: Uuid, record: Record<D>) -> Result<(), StorageError> {
         self.records.insert(id, record.to_string()?);
         // Remove existing Record Keys
         self.tags
@@ -166,7 +156,7 @@ impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
         }
         Ok(())
     }
-    fn update_record(&mut self, id: Uuid, record: R) -> Result<(), StorageError> {
+    fn update_record(&mut self, id: Uuid, record: Record<D>) -> Result<(), StorageError> {
         if self.records.contains_key(&id.clone()) {
             self.records.insert(id, record.to_string()?);
             // Remove existing Record Keys
@@ -181,24 +171,28 @@ impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
             return Err(StorageError::RecordDoesNotExist);
         }
     }
-    fn get_record(&self, id: Uuid) -> Result<Option<R>, StorageError> {
+    fn get_record(&self, id: Uuid) -> Result<Option<Record<D>>, StorageError> {
         let record = self.records.get(&id);
         match record {
-            Some(retrieved_record) => Ok(Some(R::from_string(retrieved_record)?)),
+            Some(retrieved_record) => Ok(Some(Record::from_string(retrieved_record)?)),
             None => Ok(None),
         }
     }
 
-    fn get_all_records(&self) -> Result<Vec<R>, StorageError> {
+    fn get_all_records(&self) -> Result<Vec<Record<D>>, StorageError> {
         let records = self
             .records
             .iter()
-            .map(|(_id, retrieved_record)| R::from_string(retrieved_record))
+            .map(|(_id, retrieved_record)| Record::from_string(retrieved_record))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(records)
     }
 
-    fn search_records(&self, tag_key: &str, tag_value: &str) -> Result<Vec<R>, StorageError> {
+    fn search_records(
+        &self,
+        tag_key: &str,
+        tag_value: &str,
+    ) -> Result<Vec<Record<D>>, StorageError> {
         let matching_ids: Vec<Uuid> = self
             .tags
             .iter()
@@ -227,29 +221,29 @@ impl<R: Record> VCXFrameworkStorage<Uuid, R> for InMemoryStorage<R> {
     }
 }
 
-#[cfg(feature = "did_repository")]
-pub mod did_repository {
-    use super::{SimpleRecord, VCXFrameworkStorage};
+// #[cfg(feature = "did_repository")]
+// pub mod did_repository {
+//     use super::VCXFrameworkStorage;
 
-    struct DIDRecord {
-        // I would prefer to have this be an actual DID type in the future, but that'll take work on the did_core crates - @JamesKEbert
-        did: String,
-    }
+//     struct DIDRecord {
+//         // I would prefer to have this be an actual DID type in the future, but that'll take work on the did_core crates - @JamesKEbert
+//         did: String,
+//     }
 
-    /// The `DidRepository` stores all created and known DIDs, and where appropriate, stores full DIDDocs (such as storing a long form did:peer:4 or with TTL caching strategies).
-    /// Otherwise, DID resolution should be done at runtime.
-    struct DidRepository<S: VCXFrameworkStorage<String, SimpleRecord>> {
-        store: S,
-    }
+//     /// The `DidRepository` stores all created and known DIDs, and where appropriate, stores full DIDDocs (such as storing a long form did:peer:4 or with TTL caching strategies).
+//     /// Otherwise, DID resolution should be done at runtime.
+//     struct DidRepository<S: VCXFrameworkStorage<String, SimpleRecord>> {
+//         store: S,
+//     }
 
-    impl<S: VCXFrameworkStorage<String, SimpleRecord>> DidRepository<S> {
-        fn new(store: S) -> Self {
-            Self { store }
-        }
+//     impl<S: VCXFrameworkStorage<String, SimpleRecord>> DidRepository<S> {
+//         fn new(store: S) -> Self {
+//             Self { store }
+//         }
 
-        // fn get_did_record(did: String) -> DIDRecord {}
-    }
-}
+//         // fn get_did_record(did: String) -> DIDRecord {}
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -261,7 +255,7 @@ mod tests {
     fn test_add_and_read_record() {
         test_init();
         let mut in_memory_storage = InMemoryStorage::new();
-        let record = SimpleRecord::new("Foo".to_owned(), vec![]);
+        let record = Record::new("Foo".to_owned(), vec![]);
         let id = Uuid::new_v4();
 
         let _ = in_memory_storage.add_record(id, record.clone());
@@ -276,7 +270,7 @@ mod tests {
     fn test_add_duplicate() {
         test_init();
         let mut in_memory_storage = InMemoryStorage::new();
-        let record = SimpleRecord::new("Foo".to_owned(), vec![]);
+        let record = Record::new("Foo".to_owned(), vec![]);
         let id = Uuid::new_v4();
         let _ = in_memory_storage.add_record(id, record.clone());
         assert!(matches!(
@@ -289,7 +283,7 @@ mod tests {
     fn test_add_or_update_record() {
         test_init();
         let mut in_memory_storage = InMemoryStorage::new();
-        let record = SimpleRecord::new("Foo".to_owned(), vec![]);
+        let record = Record::new("Foo".to_owned(), vec![]);
         let id = Uuid::new_v4();
         let _ = in_memory_storage.add_or_update_record(id, record.clone());
         let retrieved_record = in_memory_storage
@@ -303,8 +297,8 @@ mod tests {
     fn test_update_record() {
         test_init();
         let mut in_memory_storage = InMemoryStorage::new();
-        let record = SimpleRecord::new("Foo".to_owned(), vec![]);
-        let updated_record = SimpleRecord::new("Foo2".to_owned(), vec![]);
+        let record = Record::new("Foo".to_owned(), vec![]);
+        let updated_record = Record::new("Foo2".to_owned(), vec![]);
         let id = Uuid::new_v4();
         let _ = in_memory_storage.add_record(id, record.clone());
         let _ = in_memory_storage.update_record(id, updated_record.clone());
@@ -319,7 +313,7 @@ mod tests {
     fn test_update_record_no_record() {
         test_init();
         let mut in_memory_storage = InMemoryStorage::new();
-        let updated_record = SimpleRecord::new("Foo".to_owned(), vec![]);
+        let updated_record = Record::new("Foo".to_owned(), vec![]);
         let id = Uuid::new_v4();
 
         assert!(matches!(
@@ -332,7 +326,7 @@ mod tests {
     fn test_delete_record() {
         test_init();
         let mut in_memory_storage = InMemoryStorage::new();
-        let record = SimpleRecord::new("Foo".to_owned(), vec![]);
+        let record = Record::new("Foo".to_owned(), vec![]);
         let id = Uuid::new_v4();
         let _ = in_memory_storage.add_record(id, record.clone());
         let _ = in_memory_storage
@@ -345,7 +339,7 @@ mod tests {
     fn test_delete_record_already_deleted() {
         test_init();
         let mut in_memory_storage = InMemoryStorage::new();
-        let record = SimpleRecord::new("Foo".to_owned(), vec![]);
+        let record = Record::new("Foo".to_owned(), vec![]);
         let id = Uuid::new_v4();
         let _ = in_memory_storage.add_record(id, record.clone());
         let _ = in_memory_storage.delete_record(id);
