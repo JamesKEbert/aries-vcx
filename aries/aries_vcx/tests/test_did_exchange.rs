@@ -110,6 +110,7 @@ async fn did_exchange_test(
         &requesters_peer_did,
         "some-label".to_owned(),
         DidExchangeTypeV1::new_v1_1(),
+        None,
     )
     .await
     .unwrap();
@@ -320,6 +321,7 @@ async fn did_exchange_test_with_invalid_rotation_signature() -> Result<(), Box<d
         &requesters_peer_did,
         "some-label".to_owned(),
         DidExchangeTypeV1::new_v1_1(),
+        None,
     )
     .await?;
 

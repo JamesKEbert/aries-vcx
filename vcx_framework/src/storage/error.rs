@@ -33,8 +33,9 @@ impl Display for StorageError {
 impl error::Error for StorageError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match *self {
-            StorageError::Serialization(ref err) => Some(err),
-            StorageError::Deserialization(ref err) => Some(err),
+            StorageError::Serialization(ref err) | StorageError::Deserialization(ref err) => {
+                Some(err)
+            }
             _ => None,
         }
     }

@@ -4,10 +4,11 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use super::{base::VCXFrameworkStorage, error::StorageError, record::Record};
 
-struct InMemoryStorage<D, TK>
+#[derive(Debug)]
+pub struct InMemoryStorage<D, TK>
 where
-    D: Serialize + DeserializeOwned,
-    TK: Eq + Hash + Clone + Serialize + DeserializeOwned,
+    D: Serialize + DeserializeOwned + std::fmt::Debug,
+    TK: Eq + Hash + Clone + std::fmt::Debug + Serialize + DeserializeOwned,
 {
     records: HashMap<String, String>,
     tags: Vec<(TK, (String, String))>,
@@ -19,8 +20,8 @@ where
 
 impl<D, TK> InMemoryStorage<D, TK>
 where
-    D: Serialize + DeserializeOwned,
-    TK: Eq + Hash + Clone + Serialize + DeserializeOwned,
+    D: Serialize + DeserializeOwned + std::fmt::Debug,
+    TK: Eq + Hash + Clone + std::fmt::Debug + Serialize + DeserializeOwned,
 {
     fn new() -> Self {
         InMemoryStorage::<D, TK> {
@@ -31,13 +32,13 @@ where
         }
     }
 
-    fn _add_keys(&mut self, tags: HashMap<TK, String>, id: &String) -> () {
+    fn _add_keys(&mut self, tags: HashMap<TK, String>, id: &str) {
         for (tag_key, tag_value) in tags {
-            self.tags.push((tag_key, (tag_value, id.clone())));
+            self.tags.push((tag_key, (tag_value, id.to_owned())));
         }
     }
 
-    fn _remove_keys(&mut self, id: &String) -> () {
+    fn _remove_keys(&mut self, id: &String) {
         self.tags
             .retain(|(_tag_key, (_tag_value, stored_id))| id != stored_id);
     }
@@ -45,16 +46,16 @@ where
 
 impl<D, TK> VCXFrameworkStorage<D, TK> for InMemoryStorage<D, TK>
 where
-    D: Serialize + DeserializeOwned,
-    TK: Eq + Hash + Clone + Serialize + DeserializeOwned,
+    D: Serialize + DeserializeOwned + std::fmt::Debug,
+    TK: Eq + Hash + Clone + std::fmt::Debug + Serialize + DeserializeOwned,
 {
     fn add_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError> {
         if self.records.contains_key(&record.id) {
             return Err(StorageError::DuplicateRecord);
-        } else {
-            self.records.insert(record.id.clone(), record.to_string()?);
-            self._add_keys(record.get_tags().clone(), &record.id);
         }
+        self.records.insert(record.id.clone(), record.to_string()?);
+        self._add_keys(record.get_tags().clone(), &record.id);
+
         Ok(())
     }
     fn add_or_update_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError> {
@@ -70,7 +71,7 @@ where
             self._add_keys(record.get_tags().to_owned(), &record.id);
             Ok(())
         } else {
-            return Err(StorageError::RecordDoesNotExist);
+            Err(StorageError::RecordDoesNotExist)
         }
     }
     fn get_record(&self, id: &String) -> Result<Option<Record<D, TK>>, StorageError> {
@@ -84,8 +85,8 @@ where
     fn get_all_records(&self) -> Result<Vec<Record<D, TK>>, StorageError> {
         let records = self
             .records
-            .iter()
-            .map(|(_id, retrieved_record)| Record::from_string(retrieved_record))
+            .values()
+            .map(|retrieved_record| Record::from_string(retrieved_record))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(records)
     }
@@ -114,7 +115,7 @@ where
 
     fn delete_record(&mut self, id: &String) -> Result<(), StorageError> {
         self.records.remove(id);
-        self._remove_keys(&id);
+        self._remove_keys(id);
 
         Ok(())
     }
@@ -176,7 +177,7 @@ mod tests {
         assert!(matches!(
             in_memory_storage.add_record(record),
             Err(StorageError::DuplicateRecord),
-        ))
+        ));
     }
 
     #[test]
@@ -249,7 +250,7 @@ mod tests {
         assert!(matches!(
             in_memory_storage.update_record(updated_record),
             Err(StorageError::RecordDoesNotExist),
-        ))
+        ));
     }
 
     #[test]

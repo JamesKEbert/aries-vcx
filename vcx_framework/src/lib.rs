@@ -4,7 +4,7 @@ extern crate log;
 pub mod error {
     use std::fmt::{Display, Formatter};
 
-    use crate::storage::StorageError;
+    use crate::storage::error::StorageError;
 
     #[derive(Debug)]
     pub enum VCXFrameworkError {
@@ -37,45 +37,8 @@ pub mod messaging_module {
     }
 }
 
+pub mod repositories;
 pub mod storage;
-pub mod did_registry {
-    use std::error::Error;
-
-    pub struct DidRegistry {}
-
-    impl DidRegistry {
-        pub fn create_did() -> Result<(), Box<dyn Error>> {
-            Ok(())
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use crate::test_init;
-
-        use super::*;
-
-        #[test]
-        fn test_create_and_read_did() {
-            test_init();
-        }
-
-        #[test]
-        fn test_create_or_update_did() {
-            test_init();
-        }
-
-        #[test]
-        fn test_update_did() {
-            test_init();
-        }
-
-        #[test]
-        fn test_delete_did() {
-            test_init();
-        }
-    }
-}
 
 #[cfg(test)]
 fn test_init() {

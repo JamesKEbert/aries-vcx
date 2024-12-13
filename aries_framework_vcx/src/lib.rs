@@ -13,5 +13,3 @@ pub mod framework;
 pub mod invitation_service;
 pub mod messaging_service;
 mod transports;
-
-pub mod messaging_module;

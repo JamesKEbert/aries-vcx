@@ -171,12 +171,10 @@ impl MessagingService {
         // Note that the function name here references anon_unpack,
         // however the implementation itself will perform either anon or auth unpacking based off of the indicated "alg" in the message.
         // May be worthwhile considering adjusting the underlining function API in the future to be more clear.
-        let (message, sender_vk, recipient_vk) = EncryptionEnvelope::anon_unpack_aries_msg(
+        let (message, sender_vk, recipient_vk) = EncryptionEnvelope::unpack(
             self.wallet.as_ref(),
-            serde_json::json!(encrypted_message)
-                .to_string()
-                .as_bytes()
-                .to_vec(),
+            serde_json::json!(encrypted_message).to_string().as_bytes(),
+            &None,
         )
         .await?;
         debug!(

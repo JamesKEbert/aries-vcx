@@ -14,23 +14,23 @@ pub struct Record<D, TK: Eq + Hash> {
 
 impl<D, TK> Record<D, TK>
 where
-    D: Serialize + DeserializeOwned,
-    TK: Eq + Hash + Clone + Serialize + DeserializeOwned,
+    D: Serialize + DeserializeOwned + std::fmt::Debug,
+    TK: Eq + Hash + Clone + std::fmt::Debug + Serialize + DeserializeOwned,
 {
     pub fn new(id: String, data: D, tags: Option<HashMap<TK, String>>) -> Self {
         Self {
             id,
             data,
-            tags: tags.unwrap_or(HashMap::new()),
+            tags: tags.unwrap_or_default(),
         }
     }
     pub fn to_string(&self) -> Result<String, StorageError> {
-        serde_json::to_string(self).map_err(|err| StorageError::Serialization(err))
+        serde_json::to_string(self).map_err(StorageError::Serialization)
     }
     pub fn from_string(string: &str) -> Result<Self, StorageError> {
-        serde_json::from_str(string).map_err(|err| StorageError::Deserialization(err))
+        serde_json::from_str(string).map_err(StorageError::Deserialization)
     }
-    pub fn add_or_update_tag(&mut self, tag_key: TK, tag_value: String) -> () {
+    pub fn add_or_update_tag(&mut self, tag_key: TK, tag_value: String) {
         self.tags.insert(tag_key, tag_value);
     }
     pub fn get_tag(&self, tag_key: &TK) -> Option<&String> {
@@ -39,7 +39,7 @@ where
     pub fn get_tags(&self) -> &HashMap<TK, String> {
         &self.tags
     }
-    pub fn delete_tag(&mut self, tag_key: &TK) -> () {
+    pub fn delete_tag(&mut self, tag_key: &TK) {
         self.tags.remove(tag_key);
     }
 }
