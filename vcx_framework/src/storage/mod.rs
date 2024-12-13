@@ -1,13 +1,11 @@
 use std::{
     collections::HashMap,
     error,
-    fmt::{DebugMap, Display, Formatter},
-    hash::Hash,
+    fmt::{Display, Formatter},
     marker::PhantomData,
 };
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -47,22 +45,22 @@ impl error::Error for StorageError {
 }
 
 /// This trait provides a general purpose storage trait that provides CRUD style operations that correspond to a generic [`Record`].
-pub trait VCXFrameworkStorage<ID: RecordId, D: Serialize + DeserializeOwned> {
+pub trait VCXFrameworkStorage<D: Serialize + DeserializeOwned> {
     /// Adds a record to the storage by id. Will not update an existing record with the same id, otherwise use [`add_or_update_record()`] instead.
-    fn add_record(&mut self, id: ID, record: Record<ID, D>) -> Result<(), StorageError>;
+    fn add_record(&mut self, record: Record<D>) -> Result<(), StorageError>;
 
     /// Adds or updates an existing record by id to the storage.
-    fn add_or_update_record(&mut self, id: ID, record: Record<ID, D>) -> Result<(), StorageError>;
+    fn add_or_update_record(&mut self, record: Record<D>) -> Result<(), StorageError>;
 
     /// Updates a record in the storage. Will not update a non existent record. To update or create if non-existent, use [`add_or_update_record()`] instead.
-    fn update_record(&mut self, id: ID, record: Record<ID, D>) -> Result<(), StorageError>;
+    fn update_record(&mut self, record: Record<D>) -> Result<(), StorageError>;
 
     /// Gets a record from the storage by id if it exists.
-    fn get_record(&self, id: ID) -> Result<Option<Record<ID, D>>, StorageError>;
+    fn get_record(&self, id: String) -> Result<Option<Record<D>>, StorageError>;
 
     // TODO: Pagination
     /// Gets all records from the storage. Pagination not yet implemented
-    fn get_all_records(&self) -> Result<Vec<Record<ID, D>>, StorageError>;
+    fn get_all_records(&self) -> Result<Vec<Record<D>>, StorageError>;
 
     // TODO: Pagination
     // Searches all records in the storage by a given tag key and tag value. Pagination not yet implemented
@@ -70,36 +68,70 @@ pub trait VCXFrameworkStorage<ID: RecordId, D: Serialize + DeserializeOwned> {
         &self,
         tag_key: &str,
         tag_value: &str,
-    ) -> Result<Vec<Record<ID, D>>, StorageError>;
+    ) -> Result<Vec<Record<D>>, StorageError>;
 
     /// Deletes a record from the storage by id.
-    fn delete_record(&mut self, id: ID) -> Result<(), StorageError>;
+    fn delete_record(&mut self, id: String) -> Result<(), StorageError>;
 }
 
-pub trait RecordId: Display + Eq + Hash + Clone {
-    fn get_id(&self) -> String;
-}
+// pub trait RecordId: Display + Eq + Hash + Clone {
+//     fn get_id(&self) -> String;
+// }
 
-type RecordIdString = String;
-impl RecordId for RecordIdString {
-    fn get_id(&self) -> String {
-        self.clone()
-    }
-}
+// type RecordIdString = String;
+// impl RecordId for RecordIdString {
+//     fn get_id(&self) -> String {
+//         self.clone()
+//     }
+// }
 
-type RecordIdUuid = Uuid;
-impl RecordId for RecordIdUuid {
-    fn get_id(&self) -> String {
-        self.to_string()
-    }
-}
+// type RecordIdUuid = Uuid;
+// impl RecordId for RecordIdUuid {
+//     fn get_id(&self) -> String {
+//         self.to_string()
+//     }
+// }
+
+// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+// enum RecordId {
+//     String(String),
+//     Uuid(Uuid),
+// }
+
+// impl RecordId {
+//     fn get_id(&self) -> String {
+//         match self {
+//             Self::String(string) => string.clone(),
+//             Self::Uuid(uuid) => uuid.to_string(),
+//         }
+//     }
+// }
+
+// impl Display for RecordId {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             _ => write!(f, "{}", self.to_string()),
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RecordTags {
+pub struct Record<D> {
+    id: String,
+    data: D,
     tags: HashMap<String, String>,
 }
 
-impl RecordTags {
+impl<D: Serialize + DeserializeOwned> Record<D> {
+    fn new(id: String, data: D, tags: HashMap<String, String>) -> Self {
+        Self { id, data, tags }
+    }
+    fn to_string(&self) -> Result<String, StorageError> {
+        serde_json::to_string(self).map_err(|err| StorageError::Serialization(err))
+    }
+    fn from_string(string: &str) -> Result<Self, StorageError> {
+        serde_json::from_str(string).map_err(|err| StorageError::Deserialization(err))
+    }
     fn add_or_update_tag(&mut self, tag_key: String, tag_value: String) -> () {
         self.tags.insert(tag_key, tag_value);
     }
@@ -115,28 +147,14 @@ impl RecordTags {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Record<ID: RecordId, D> {
-    id: ID,
-    data: D,
-    tags: RecordTags,
-}
-
-impl<ID: RecordId, D> Record<ID, D> {
-    fn new(id: ID, data: D, tags: RecordTags) -> Self {
-        Self { id, data, tags }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DidRecordData {
     value: String,
 }
 
 fn test() {
-    let id = "IDString".to_owned();
-    let tags = RecordTags {
-        tags: HashMap::new(),
-    };
+    // let id = "IDString".to_owned();
+    let id = "IDSTRING".to_string();
+    let tags = HashMap::new();
     let record = Record::new(
         id,
         DidRecordData {
@@ -144,7 +162,7 @@ fn test() {
         },
         tags,
     );
-    info!("{}", record.id.get_id());
+    info!("{}", record.id);
     info!("Record: {:#?}", record);
 }
 
@@ -241,69 +259,62 @@ fn test() {
 //     }
 // }
 
-struct InMemoryStorage<ID: RecordId, D: Serialize + DeserializeOwned> {
-    records: HashMap<ID, String>,
-    tags: Vec<(String, (String, ID))>,
+struct InMemoryStorage<D: Serialize + DeserializeOwned> {
+    records: HashMap<String, String>,
+    tags: Vec<(String, (String, String))>,
     // PhantomData is used so that the Record type must be determined at `new()`, which is required given that the Record type isn't specified in any of the struct fields.
     // This is done so that the type doesn't have to be inferred or manually set later during use.
     _phantom: PhantomData<D>,
 }
 
-impl<ID: RecordId, D: Serialize + DeserializeOwned> InMemoryStorage<ID, D> {
+impl<D: Serialize + DeserializeOwned> InMemoryStorage<D> {
     fn new() -> Self {
-        InMemoryStorage::<ID, D> {
+        InMemoryStorage::<D> {
             records: HashMap::new(),
             tags: vec![],
             _phantom: PhantomData,
         }
     }
+
+    fn _add_keys(&mut self, tags: HashMap<String, String>, id: &String) -> () {
+        for (tag_key, tag_value) in tags {
+            self.tags.push((tag_key, (tag_value, id.clone())));
+        }
+    }
+
+    fn _remove_keys(&mut self, id: &String) -> () {
+        self.tags
+            .retain(|(_tag_key, (_tag_value, stored_id))| id != stored_id);
+    }
 }
 
-impl<ID: RecordId, D: Serialize + DeserializeOwned> VCXFrameworkStorage<ID, D>
-    for InMemoryStorage<ID, D>
-{
-    fn add_record(&mut self, id: ID, record: Record<ID, D>) -> Result<(), StorageError> {
-        if self.records.contains_key(&id.clone()) {
+impl<D: Serialize + DeserializeOwned> VCXFrameworkStorage<D> for InMemoryStorage<D> {
+    fn add_record(&mut self, record: Record<D>) -> Result<(), StorageError> {
+        if self.records.contains_key(&record.id) {
             return Err(StorageError::DuplicateRecord);
         } else {
-            self.records.insert(
-                id,
-                serde_json::to_string(&record).map_err(|err| StorageError::Serialization(err))?,
-            );
-            // Add Record Keys
-            for (tag_key, tag_value) in record.get_tags().to_owned() {
-                self.tags.push((tag_key, (tag_value, id)));
-            }
+            self.records.insert(record.id.clone(), record.to_string()?);
+            self._add_keys(record.get_tags().to_owned(), &record.id);
         }
         Ok(())
     }
-    fn add_or_update_record(&mut self, id: ID, record: Record<ID, D>) -> Result<(), StorageError> {
-        self.records.insert(id, record.to_string()?);
-        // Remove existing Record Keys
-        self.tags
-            .retain(|(_tag_key, (_tag_value, stored_id))| &id != stored_id);
-        // Add Record Keys
-        for (tag_key, tag_value) in record.get_tags().to_owned() {
-            self.tags.push((tag_key, (tag_value, id)));
-        }
+    fn add_or_update_record(&mut self, record: Record<D>) -> Result<(), StorageError> {
+        self.records.insert(record.id.clone(), record.to_string()?);
+        self._remove_keys(&record.id);
+        self._add_keys(record.get_tags().to_owned(), &record.id);
         Ok(())
     }
-    fn update_record(&mut self, id: ID, record: Record<ID, D>) -> Result<(), StorageError> {
-        if self.records.contains_key(&id.clone()) {
-            self.records.insert(id, record.to_string()?);
-            // Remove existing Record Keys
-            self.tags
-                .retain(|(_tag_key, (_tag_value, stored_id))| &id != stored_id);
-            // Add Record Keys
-            for (tag_key, tag_value) in record.get_tags().to_owned() {
-                self.tags.push((tag_key, (tag_value, id)));
-            }
+    fn update_record(&mut self, record: Record<D>) -> Result<(), StorageError> {
+        if self.records.contains_key(&record.id.clone()) {
+            self.records.insert(record.id.clone(), record.to_string()?);
+            self._remove_keys(&record.id);
+            self._add_keys(record.get_tags().to_owned(), &record.id);
             Ok(())
         } else {
             return Err(StorageError::RecordDoesNotExist);
         }
     }
-    fn get_record(&self, id: ID) -> Result<Option<Record<ID, D>>, StorageError> {
+    fn get_record(&self, id: String) -> Result<Option<Record<D>>, StorageError> {
         let record = self.records.get(&id);
         match record {
             Some(retrieved_record) => Ok(Some(Record::from_string(retrieved_record)?)),
@@ -311,7 +322,7 @@ impl<ID: RecordId, D: Serialize + DeserializeOwned> VCXFrameworkStorage<ID, D>
         }
     }
 
-    fn get_all_records(&self) -> Result<Vec<Record<ID, D>>, StorageError> {
+    fn get_all_records(&self) -> Result<Vec<Record<D>>, StorageError> {
         let records = self
             .records
             .iter()
@@ -324,14 +335,14 @@ impl<ID: RecordId, D: Serialize + DeserializeOwned> VCXFrameworkStorage<ID, D>
         &self,
         tag_key: &str,
         tag_value: &str,
-    ) -> Result<Vec<Record<ID, D>>, StorageError> {
-        let matching_ids: Vec<ID> = self
+    ) -> Result<Vec<Record<D>>, StorageError> {
+        let matching_ids: Vec<String> = self
             .tags
             .iter()
             .filter(|(stored_tag_key, (stored_tag_value, _stored_tag_id))| {
                 tag_key == stored_tag_key && tag_value == stored_tag_value
             })
-            .map(|tag| tag.1 .1)
+            .map(|tag| tag.1 .1.clone())
             .collect();
         let mut records = vec![];
         for id in matching_ids {
@@ -342,12 +353,9 @@ impl<ID: RecordId, D: Serialize + DeserializeOwned> VCXFrameworkStorage<ID, D>
         Ok(records)
     }
 
-    fn delete_record(&mut self, id: ID) -> Result<(), StorageError> {
+    fn delete_record(&mut self, id: String) -> Result<(), StorageError> {
         self.records.remove(&id);
-
-        // Remove existing Record Keys
-        self.tags
-            .retain(|(_tag_key, (_tag_value, stored_id))| &id != stored_id);
+        self._remove_keys(&id);
 
         Ok(())
     }
