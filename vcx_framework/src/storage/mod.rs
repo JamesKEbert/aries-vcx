@@ -56,7 +56,7 @@ pub trait VCXFrameworkStorage<D: Serialize + DeserializeOwned> {
     fn update_record(&mut self, record: Record<D>) -> Result<(), StorageError>;
 
     /// Gets a record from the storage by id if it exists.
-    fn get_record(&self, id: String) -> Result<Option<Record<D>>, StorageError>;
+    fn get_record(&self, id: &String) -> Result<Option<Record<D>>, StorageError>;
 
     // TODO: Pagination
     /// Gets all records from the storage. Pagination not yet implemented
@@ -71,51 +71,10 @@ pub trait VCXFrameworkStorage<D: Serialize + DeserializeOwned> {
     ) -> Result<Vec<Record<D>>, StorageError>;
 
     /// Deletes a record from the storage by id.
-    fn delete_record(&mut self, id: String) -> Result<(), StorageError>;
+    fn delete_record(&mut self, id: &String) -> Result<(), StorageError>;
 }
 
-// pub trait RecordId: Display + Eq + Hash + Clone {
-//     fn get_id(&self) -> String;
-// }
-
-// type RecordIdString = String;
-// impl RecordId for RecordIdString {
-//     fn get_id(&self) -> String {
-//         self.clone()
-//     }
-// }
-
-// type RecordIdUuid = Uuid;
-// impl RecordId for RecordIdUuid {
-//     fn get_id(&self) -> String {
-//         self.to_string()
-//     }
-// }
-
-// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-// enum RecordId {
-//     String(String),
-//     Uuid(Uuid),
-// }
-
-// impl RecordId {
-//     fn get_id(&self) -> String {
-//         match self {
-//             Self::String(string) => string.clone(),
-//             Self::Uuid(uuid) => uuid.to_string(),
-//         }
-//     }
-// }
-
-// impl Display for RecordId {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             _ => write!(f, "{}", self.to_string()),
-//         }
-//     }
-// }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Record<D> {
     id: String,
     data: D,
@@ -123,8 +82,12 @@ pub struct Record<D> {
 }
 
 impl<D: Serialize + DeserializeOwned> Record<D> {
-    fn new(id: String, data: D, tags: HashMap<String, String>) -> Self {
-        Self { id, data, tags }
+    fn new(id: String, data: D, tags: Option<HashMap<String, String>>) -> Self {
+        Self {
+            id,
+            data,
+            tags: tags.unwrap_or(HashMap::new()),
+        }
     }
     fn to_string(&self) -> Result<String, StorageError> {
         serde_json::to_string(self).map_err(|err| StorageError::Serialization(err))
@@ -152,112 +115,18 @@ pub struct DidRecordData {
 }
 
 fn test() {
-    // let id = "IDString".to_owned();
-    let id = "IDSTRING".to_string();
+    let id = String::from("IDSTRING");
     let tags = HashMap::new();
     let record = Record::new(
         id,
         DidRecordData {
-            value: "TestVal".to_owned(),
+            value: String::from("TestVal"),
         },
-        tags,
+        Some(tags),
     );
     info!("{}", record.id);
     info!("Record: {:#?}", record);
 }
-
-// impl Record {
-//     fn to_string(&self) -> Result<String, StorageError> {
-//         serde_json::to_string(self).map_err(|err| StorageError::Serialization(err))
-//     }
-//     fn from_string(string: &str) -> Result<Self, StorageError> {
-//         serde_json::from_str(string).map_err(|err| StorageError::Deserialization(err))
-//     }
-//     fn add_or_update_tag(&mut self, tag_key: String, tag_value: String) -> () {
-//         self.tags.insert(tag_key, tag_value);
-//     }
-//     fn get_tag(&self, tag_key: &str) -> Option<&String> {
-//         self.tags.get(tag_key)
-//     }
-//     fn get_tags(&self) -> &HashMap<String, String> {
-//         &self.tags
-//     }
-//     fn delete_tag(&mut self, tag_key: &str) -> () {
-//         self.tags.remove(tag_key);
-//     }
-// }
-
-// pub struct DIDRecord {}
-
-// impl Record for DIDRecord {}
-
-// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-// enum RecordId {
-//     String(String),
-//     Uuid(Uuid),
-// }
-
-// impl RecordId {
-//     fn get_id(&self) -> String {
-//         match self {
-//             Self::String(string) => string.clone(),
-//             Self::Uuid(uuid) => uuid.to_string(),
-//         }
-//     }
-// }
-
-// impl Display for RecordId {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-//         match self {
-//             _ => write!(f, "{}", self.to_string()),
-//         }
-//     }
-// }
-
-// pub trait RecordData {
-//     fn get_id(&self) -> String;
-// }
-
-// /// A general-purpose Record that takes generic data for use with [`VCXFrameworkStorage`]. The record provides methods for serializing from and deserializing to a String,
-// /// and for getting, updating, and deleting record tags. Tags are used for querying records by metadata. `Record` also takes an ID
-// #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-// pub struct Record<D> {
-//     id: RecordId,
-//     data: D,
-//     tags: HashMap<String, String>,
-// }
-
-// impl<D: Serialize + DeserializeOwned + RecordData> Record<D> {
-//     fn new(data: D, id: RecordId, tags: Vec<(String, String)>) -> Self {
-//         let mut tags_map = HashMap::new();
-//         for (tag_key, tag_value) in tags {
-//             tags_map.insert(tag_key, tag_value);
-//         }
-//         Self {
-//             id,
-//             data,
-//             tags: tags_map,
-//         }
-//     }
-//     fn to_string(&self) -> Result<String, StorageError> {
-//         serde_json::to_string(self).map_err(|err| StorageError::Serialization(err))
-//     }
-//     fn from_string(string: &str) -> Result<Self, StorageError> {
-//         serde_json::from_str(string).map_err(|err| StorageError::Deserialization(err))
-//     }
-//     fn add_or_update_tag(&mut self, tag_key: String, tag_value: String) -> () {
-//         self.tags.insert(tag_key, tag_value);
-//     }
-//     fn get_tag(&self, tag_key: &str) -> Option<&String> {
-//         self.tags.get(tag_key)
-//     }
-//     fn get_tags(&self) -> &HashMap<String, String> {
-//         &self.tags
-//     }
-//     fn delete_tag(&mut self, tag_key: &str) -> () {
-//         self.tags.remove(tag_key);
-//     }
-// }
 
 struct InMemoryStorage<D: Serialize + DeserializeOwned> {
     records: HashMap<String, String>,
@@ -305,7 +174,7 @@ impl<D: Serialize + DeserializeOwned> VCXFrameworkStorage<D> for InMemoryStorage
         Ok(())
     }
     fn update_record(&mut self, record: Record<D>) -> Result<(), StorageError> {
-        if self.records.contains_key(&record.id.clone()) {
+        if self.records.contains_key(&record.id) {
             self.records.insert(record.id.clone(), record.to_string()?);
             self._remove_keys(&record.id);
             self._add_keys(record.get_tags().to_owned(), &record.id);
@@ -314,8 +183,8 @@ impl<D: Serialize + DeserializeOwned> VCXFrameworkStorage<D> for InMemoryStorage
             return Err(StorageError::RecordDoesNotExist);
         }
     }
-    fn get_record(&self, id: String) -> Result<Option<Record<D>>, StorageError> {
-        let record = self.records.get(&id);
+    fn get_record(&self, id: &String) -> Result<Option<Record<D>>, StorageError> {
+        let record = self.records.get(id);
         match record {
             Some(retrieved_record) => Ok(Some(Record::from_string(retrieved_record)?)),
             None => Ok(None),
@@ -346,15 +215,15 @@ impl<D: Serialize + DeserializeOwned> VCXFrameworkStorage<D> for InMemoryStorage
             .collect();
         let mut records = vec![];
         for id in matching_ids {
-            if let Some(record) = self.get_record(id)? {
+            if let Some(record) = self.get_record(&id)? {
                 records.push(record);
             }
         }
         Ok(records)
     }
 
-    fn delete_record(&mut self, id: String) -> Result<(), StorageError> {
-        self.records.remove(&id);
+    fn delete_record(&mut self, id: &String) -> Result<(), StorageError> {
+        self.records.remove(id);
         self._remove_keys(&id);
 
         Ok(())
@@ -396,99 +265,108 @@ mod tests {
         test_init();
         test();
     }
-    // #[test]
-    // fn test_add_and_read_record() {
-    //     test_init();
-    //     let mut in_memory_storage = InMemoryStorage::new();
-    //     let record = Record::new("Foo".to_owned(), RecordId::String("bob".to_owned()), vec![]);
-    //     let id = Uuid::new_v4();
+    #[test]
+    fn test_add_and_read_record() {
+        test_init();
+        let mut in_memory_storage = InMemoryStorage::new();
+        let id = String::from("id1");
+        let record = Record::new(id.clone(), String::from("foo"), None);
 
-    //     let _ = in_memory_storage.add_record(id, record.clone());
-    //     let retrieved_record = in_memory_storage
-    //         .get_record(id)
-    //         .unwrap()
-    //         .expect("Record to exist");
-    //     assert_eq!(record, retrieved_record);
-    // }
+        in_memory_storage.add_record(record.clone()).unwrap();
+        let retrieved_record = in_memory_storage
+            .get_record(&id)
+            .unwrap()
+            .expect("Record to exist");
+        assert_eq!(record, retrieved_record);
+    }
 
-    // #[test]
-    // fn test_add_duplicate() {
-    //     test_init();
-    //     let mut in_memory_storage = InMemoryStorage::new();
-    //     let id = Uuid::new_v4();
-    //     let record = Record::new("Foo".to_owned(), RecordId::Uuid(id), vec![]);
-    //     let _ = in_memory_storage.add_record(id, record.clone());
-    //     assert!(matches!(
-    //         in_memory_storage.add_record(id, record),
-    //         Err(StorageError::DuplicateRecord),
-    //     ))
-    // }
+    #[test]
+    fn test_add_duplicate() {
+        test_init();
+        let mut in_memory_storage = InMemoryStorage::new();
+        let id = String::from("id1");
+        let record = Record::new(id, String::from("foo"), None);
 
-    // #[test]
-    // fn test_add_or_update_record() {
-    //     test_init();
-    //     let mut in_memory_storage = InMemoryStorage::new();
-    //     let record = Record::new("Foo".to_owned(), vec![]);
-    //     let id = Uuid::new_v4();
-    //     let _ = in_memory_storage.add_or_update_record(id, record.clone());
-    //     let retrieved_record = in_memory_storage
-    //         .get_record(id)
-    //         .unwrap()
-    //         .expect("Record to exist");
-    //     assert_eq!(record, retrieved_record);
-    // }
+        in_memory_storage.add_record(record.clone()).unwrap();
+        assert!(matches!(
+            in_memory_storage.add_record(record),
+            Err(StorageError::DuplicateRecord),
+        ))
+    }
 
-    // #[test]
-    // fn test_update_record() {
-    //     test_init();
-    //     let mut in_memory_storage = InMemoryStorage::new();
-    //     let record = Record::new("Foo".to_owned(), vec![]);
-    //     let updated_record = Record::new("Foo2".to_owned(), vec![]);
-    //     let id = Uuid::new_v4();
-    //     let _ = in_memory_storage.add_record(id, record.clone());
-    //     let _ = in_memory_storage.update_record(id, updated_record.clone());
-    //     let retrieved_record = in_memory_storage
-    //         .get_record(id)
-    //         .unwrap()
-    //         .expect("Record to exist");
-    //     assert_eq!(updated_record, retrieved_record);
-    // }
+    #[test]
+    fn test_add_or_update_record() {
+        test_init();
+        let mut in_memory_storage = InMemoryStorage::new();
+        let id = String::from("id1");
+        let record = Record::new(id.clone(), String::from("foo"), None);
 
-    // #[test]
-    // fn test_update_record_no_record() {
-    //     test_init();
-    //     let mut in_memory_storage = InMemoryStorage::new();
-    //     let updated_record = Record::new("Foo".to_owned(), vec![]);
-    //     let id = Uuid::new_v4();
+        in_memory_storage
+            .add_or_update_record(record.clone())
+            .unwrap();
+        let retrieved_record = in_memory_storage
+            .get_record(&id)
+            .unwrap()
+            .expect("Record to exist");
+        assert_eq!(record, retrieved_record);
+    }
 
-    //     assert!(matches!(
-    //         in_memory_storage.update_record(id, updated_record),
-    //         Err(StorageError::RecordDoesNotExist),
-    //     ))
-    // }
+    #[test]
+    fn test_update_record() {
+        test_init();
+        let mut in_memory_storage = InMemoryStorage::new();
+        let id = String::from("id1");
+        let record = Record::new(id.clone(), String::from("foo"), None);
+        let updated_record = Record::new(id.clone(), String::from("Foo2"), None);
 
-    // #[test]
-    // fn test_delete_record() {
-    //     test_init();
-    //     let mut in_memory_storage = InMemoryStorage::new();
-    //     let record = Record::new("Foo".to_owned(), vec![]);
-    //     let id = Uuid::new_v4();
-    //     let _ = in_memory_storage.add_record(id, record.clone());
-    //     let _ = in_memory_storage
-    //         .delete_record(id)
-    //         .expect("To delete record");
-    //     assert_eq!(None, in_memory_storage.get_record(id).unwrap());
-    // }
+        in_memory_storage.add_record(record.clone()).unwrap();
+        in_memory_storage
+            .update_record(updated_record.clone())
+            .unwrap();
+        let retrieved_record = in_memory_storage
+            .get_record(&id)
+            .unwrap()
+            .expect("Record to exist");
+        assert_eq!(updated_record, retrieved_record);
+    }
 
-    // #[test]
-    // fn test_delete_record_already_deleted() {
-    //     test_init();
-    //     let mut in_memory_storage = InMemoryStorage::new();
-    //     let record = Record::new("Foo".to_owned(), vec![]);
-    //     let id = Uuid::new_v4();
-    //     let _ = in_memory_storage.add_record(id, record.clone());
-    //     let _ = in_memory_storage.delete_record(id);
-    //     let _ = in_memory_storage.delete_record(id);
-    //     assert_eq!(None, in_memory_storage.get_record(id).unwrap());
-    // }
+    #[test]
+    fn test_update_record_no_record() {
+        test_init();
+        let mut in_memory_storage = InMemoryStorage::new();
+        let id = String::from("id1");
+        let updated_record = Record::new(id.clone(), String::from("Foo2"), None);
+
+        assert!(matches!(
+            in_memory_storage.update_record(updated_record),
+            Err(StorageError::RecordDoesNotExist),
+        ))
+    }
+
+    #[test]
+    fn test_delete_record() {
+        test_init();
+        let mut in_memory_storage = InMemoryStorage::new();
+        let id = String::from("id1");
+        let record = Record::new(id.clone(), String::from("foo"), None);
+
+        in_memory_storage.add_record(record.clone()).unwrap();
+        in_memory_storage
+            .delete_record(&id)
+            .expect("To delete record");
+        assert_eq!(None, in_memory_storage.get_record(&id).unwrap());
+    }
+
+    #[test]
+    fn test_delete_record_already_deleted() {
+        test_init();
+        let mut in_memory_storage = InMemoryStorage::new();
+        let id = String::from("id1");
+        let record = Record::new(id.clone(), String::from("foo"), None);
+
+        in_memory_storage.add_record(record.clone()).unwrap();
+        in_memory_storage.delete_record(&id).unwrap();
+        in_memory_storage.delete_record(&id).unwrap();
+        assert_eq!(None, in_memory_storage.get_record(&id).unwrap());
+    }
 }
