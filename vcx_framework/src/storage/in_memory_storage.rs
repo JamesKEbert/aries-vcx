@@ -23,7 +23,7 @@ where
     D: Serialize + DeserializeOwned + std::fmt::Debug,
     TK: Eq + Hash + Clone + std::fmt::Debug + Serialize + DeserializeOwned,
 {
-    fn new() -> Self {
+    pub fn new() -> Self {
         InMemoryStorage::<D, TK> {
             records: HashMap::new(),
             tags: vec![],
@@ -32,13 +32,13 @@ where
         }
     }
 
-    fn _add_keys(&mut self, tags: HashMap<TK, String>, id: &str) {
+    fn add_keys(&mut self, tags: HashMap<TK, String>, id: &str) {
         for (tag_key, tag_value) in tags {
             self.tags.push((tag_key, (tag_value, id.to_owned())));
         }
     }
 
-    fn _remove_keys(&mut self, id: &String) {
+    fn remove_keys(&mut self, id: &str) {
         self.tags
             .retain(|(_tag_key, (_tag_value, stored_id))| id != stored_id);
     }
@@ -54,27 +54,27 @@ where
             return Err(StorageError::DuplicateRecord);
         }
         self.records.insert(record.id.clone(), record.to_string()?);
-        self._add_keys(record.get_tags().clone(), &record.id);
+        self.add_keys(record.get_tags().clone(), &record.id);
 
         Ok(())
     }
     fn add_or_update_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError> {
         self.records.insert(record.id.clone(), record.to_string()?);
-        self._remove_keys(&record.id);
-        self._add_keys(record.get_tags().to_owned(), &record.id);
+        self.remove_keys(&record.id);
+        self.add_keys(record.get_tags().to_owned(), &record.id);
         Ok(())
     }
     fn update_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError> {
         if self.records.contains_key(&record.id) {
             self.records.insert(record.id.clone(), record.to_string()?);
-            self._remove_keys(&record.id);
-            self._add_keys(record.get_tags().to_owned(), &record.id);
+            self.remove_keys(&record.id);
+            self.add_keys(record.get_tags().to_owned(), &record.id);
             Ok(())
         } else {
             Err(StorageError::RecordDoesNotExist)
         }
     }
-    fn get_record(&self, id: &String) -> Result<Option<Record<D, TK>>, StorageError> {
+    fn get_record(&self, id: &str) -> Result<Option<Record<D, TK>>, StorageError> {
         let record = self.records.get(id);
         match record {
             Some(retrieved_record) => Ok(Some(Record::from_string(retrieved_record)?)),
@@ -113,9 +113,9 @@ where
         Ok(records)
     }
 
-    fn delete_record(&mut self, id: &String) -> Result<(), StorageError> {
+    fn delete_record(&mut self, id: &str) -> Result<(), StorageError> {
         self.records.remove(id);
-        self._remove_keys(id);
+        self.remove_keys(id);
 
         Ok(())
     }
