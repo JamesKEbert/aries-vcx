@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "aries-vcx-agent"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "anoncreds_types",
  "aries_vcx",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "aries_vcx"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "anoncreds_types",
  "aries_vcx_anoncreds",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "aries_vcx_anoncreds"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "anoncreds",
  "anoncreds_types",
@@ -616,28 +616,35 @@ dependencies = [
 
 [[package]]
 name = "aries_vcx_ledger"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "anoncreds_types",
  "aries_vcx_wallet",
  "async-trait",
+ "bitvec",
+ "chrono",
+ "did_cheqd",
  "did_parser_nom",
+ "did_resolver",
  "indy-ledger-response-parser",
  "indy-vdr",
  "indy-vdr-proxy-client",
  "log",
  "lru",
+ "mockall",
  "public_key",
  "serde",
  "serde_json",
  "thiserror",
  "time",
  "tokio",
+ "url",
+ "uuid",
 ]
 
 [[package]]
 name = "aries_vcx_wallet"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "anyhow",
  "aries-askar",
@@ -1817,6 +1824,7 @@ dependencies = [
  "env_logger 0.11.5",
  "log",
  "nom",
+ "percent-encoding",
  "serde",
  "serde_test",
 ]
@@ -1859,6 +1867,7 @@ dependencies = [
  "did_parser_nom",
  "serde",
  "serde_json",
+ "typed-builder",
 ]
 
 [[package]]
@@ -1913,7 +1922,7 @@ dependencies = [
 
 [[package]]
 name = "diddoc_legacy"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "display_as_json",
  "serde",
@@ -3269,7 +3278,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "messages"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "chrono",
  "derive_more",
@@ -3370,9 +3379,9 @@ dependencies = [
 
 [[package]]
 name = "mockall"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4c28b3fb6d753d28c20e826cd46ee611fda1cf3cde03a443a974043247c065a"
+checksum = "39a6bfcc6c8c7eed5ee98b9c3e33adc726054389233e201c95dab2d41a3839d2"
 dependencies = [
  "cfg-if",
  "downcast",
@@ -3384,9 +3393,9 @@ dependencies = [
 
 [[package]]
 name = "mockall_derive"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "341014e7f530314e9a1fdbc7400b244efea7122662c96bfa248c31da5bfb2020"
+checksum = "25ca3004c2efe9011bd4e461bd8256445052b9615405b4f7ea43fc8ca5c20898"
 dependencies = [
  "cfg-if",
  "proc-macro2",
@@ -4618,7 +4627,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "bs58",
  "lazy_static",
@@ -5145,7 +5154,7 @@ checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
 name = "test_utils"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "anoncreds_types",
  "aries_vcx_anoncreds",
@@ -5590,7 +5599,7 @@ dependencies = [
 
 [[package]]
 name = "uniffi_aries_vcx"
-version = "0.66.0"
+version = "0.67.0"
 dependencies = [
  "android_logger",
  "aries_vcx",
