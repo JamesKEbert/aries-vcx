@@ -6,9 +6,10 @@ use async_trait::async_trait;
 use did_resolver::{
     did_doc::schema::did_doc::DidDocument,
     did_parser_nom::Did,
-    error::GenericError,
     traits::resolvable::{resolution_output::DidResolutionOutput, DidResolvable},
 };
+
+pub use did_resolver::error::GenericError;
 use error::DidResolverRegistryError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

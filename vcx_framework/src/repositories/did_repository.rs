@@ -88,7 +88,7 @@ impl<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> DidRepository<S> {
     }
 
     fn get_record(
-        &mut self,
+        &self,
         did: &str,
     ) -> Result<Option<Record<DidRecordData, DidRecordTagKeys>>, DidRepositoryError> {
         trace!("Getting DidRecord by DID '{}'", did);

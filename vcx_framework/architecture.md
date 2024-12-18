@@ -33,7 +33,19 @@ The VCX Framework is comprised of `Modules`, `Services`, and `Repositories`:
 - Connections Repository -- holds the states of all connection records, including states, metadata, and references to DIDs
 - Mediator Repository -- holds all the states of the mediator records, including references to associated connections.
 
-## Sample inbound connection request message flow:
+## Sample inbound connection requ    #[derive(Error, Debug)]
+    pub enum MessagingError {
+        #[error("error resolving DID `{1}`")]
+        DidResolution(#[source] GenericError, String),
+        #[error("error resolving peer DID `{1}`")]
+        DidResolutionPeerDid(#[source] DidPeerError, String),
+        #[error("unable to get service from DIDDoc for DID `{1}`")]
+        InvalidDidDocService(#[source] DidDocumentLookupError, String),
+        #[error("error encrypting message")]
+        EncryptMessage(#[source] AriesVcxError),
+        #[error("error decrypting message")]
+        DecryptMessage(#[source] AriesVcxError),
+    }est message flow:
 
 - Incoming HTTP POST message to HTTP server
   - handled by Transport Service
@@ -49,16 +61,70 @@ The VCX Framework is comprised of `Modules`, `Services`, and `Repositories`:
             - emits event via Events Service
 
 ## Error Handling
+### Use Specific errors
 
-What are VCX Framework's error handling goals:
+As framework developers, where possible, we should avoid making general-case errors, such as:
 
-- Specific - any given error must have a corresponding code/identifier such that an end user could provide the code and a developer could identify specifically where the issue occurred.
-- Errors should be statically defined - **DON'T** allow generic error messages to be supplied, as it's much harder for end-developers to handle all error cases, as they cannot `Match()` errors by dynamic messages. **DO** define errors as `enum`s to enable matching
-- The Framework should handle any dependency errors and then if appropriate provide a Framework specific error -- "Couldn't deserialize json" Serde dependency error gets handled/mapped and returned as "Couldn't process inbound DIDComm message" Framework error. Additionally, the original source of the error can be retrieved via .source(). This provides a powerful way of providing context to the original issue, without just blindly wrapping and passing all errors up the chain.
+```rust
+  #[derive(Error, Debug)]
+  struct GeneralMessagingError {
+    string: String
+  }
 
-### Error Types:
+  err(GeneralMessagingError::new(format!("Error resolving DID {did}")));
+  err(GeneralMessagingError::new("Error sending message"));
+```
 
-- VCXFrameworkError -- A VCXFrameworkError is an error that generally is related to the action the end-developer was attempting to perform, such as connecting, issuance, etc ("Error connecting"). If a method or function is callable by end-developers, it should return a `VCXFrameworkError`. Given the open-ended, flexible nature of the framework, most `Modules` are likely to return `VCXFrameworkError`s over internal dependency errors.
-- Dependency errors -- Dependency errors are errors stemming from dependencies, such as UUID, Serde, etc. These errors should be handled and mapped to `VCXFrameworkError`s wherever possible. The thought process here is that the framework should first indicate what action failed, with the causes determinable via the stack trace. For instance, an error of 'Serde deserialization failed' does not give a developer context as to what the issue is, while rather "Failed to deserialize inbound DIDComm message" does provide the necessary context.
+Instead, prefer enums that provide the ability to `match` against, giving the end-developer complete flexibility in how to proceed:
 
-> This architectural approach for error handling may need further adjustment as development on the framework progresses - @JamesKEbert
+```rust
+  #[derive(Error, Debug)]
+  enum MessagingError {
+    #[error("error resolving DID `{1}`")]
+    DidResolution(#[source] GenericError, String),
+    #[error("error resolving peer DID `{1}`")]
+    DidResolutionPeerDid(#[source] DidPeerError, String),
+  }
+```
+
+### Avoid General Mapping Errors
+
+As framework developers, we should avoid wrapping errors with `from`, such as:
+
+```rust
+  #[derive(Error, Debug)]
+  enum MessagingError {
+    #[error("Aries VCX Error")]
+    DecryptMessage(#[from] AriesVcxError),
+  }
+
+  fn example() -> Result<(), MessagingError> {
+    let value = function_that_returns_ariesvcxerror()?;
+  }
+```
+or
+```rust
+impl From<serde_json::Error> for AriesVcxError {
+  fn from(_err: serde_json::Error) -> Self {
+    AriesVcxError::from_msg(AriesVcxErrorKind::InvalidJson, "Invalid json".to_string())
+  }
+}
+```
+
+Why? Well, the above makes it very easy to handle errors as *framework developers*, but reduces the info provided in errors for the *end-developer*. Additionally, errors can then be provided with additional information/context that is not available in the source error. 
+
+Instead, prefer mapping the error, which is illustrated well here with two errors that have different surrounding contexts but have the same underlying error:
+
+```rust
+  #[derive(Error, Debug)]
+  pub enum MessagingError {
+    #[error("error encrypting message")]
+    EncryptMessage(#[source] AriesVcxError),
+    #[error("error decrypting message")]
+    DecryptMessage(#[source] AriesVcxError),
+  }
+
+  fn example() -> Result<(), MessagingError> {
+    let value = function_that_returns_ariesvcxerror().map_err(MessagingError::EncryptMessage)?;
+  }
+```
