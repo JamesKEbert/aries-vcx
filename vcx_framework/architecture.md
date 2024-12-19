@@ -52,8 +52,6 @@ The VCX Framework is comprised of `Modules`, `Services`, and `Repositories`:
     - calls Messaging Module
       - calls relevant module handler, specifically the Connection Module
         - creates response message
-          - stores/updates record in Connection Repository with created status
-            - emits event via Events Service
           - sends response message via Messaging Module
             - call transport service to send message
               - call outbound HTTP handler to send message

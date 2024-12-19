@@ -23,17 +23,15 @@ pub mod error {
 }
 
 pub mod messaging_module {
-    use std::{
-        error::Error,
-        fmt::{Display, Formatter},
-        io::{self},
-    };
+    use std::{clone, collections::HashMap, str::FromStr};
 
     use thiserror::Error;
 
     use aries_vcx::{
-        aries_vcx_wallet::wallet::base_wallet::{did_wallet::DidWallet, BaseWallet},
-        did_doc::schema::{service::typed::ServiceType, utils::error::DidDocumentLookupError},
+        aries_vcx_wallet::wallet::{askar::packing_types::Jwe, base_wallet::BaseWallet},
+        did_doc::schema::{
+            self, service::typed::ServiceType, utils::error::DidDocumentLookupError,
+        },
         did_parser_nom::Did,
         did_peer::{
             error::DidPeerError,
@@ -44,7 +42,8 @@ pub mod messaging_module {
         utils::encryption_envelope::EncryptionEnvelope,
     };
     use did_resolver_registry::GenericError;
-    use uuid::Uuid;
+    use url::Url;
+
     #[derive(Error, Debug)]
     pub enum MessagingError {
         #[error("error resolving DID `{1}`")]
@@ -57,43 +56,11 @@ pub mod messaging_module {
         EncryptMessage(#[source] AriesVcxError),
         #[error("error decrypting message")]
         DecryptMessage(#[source] AriesVcxError),
+        #[error("invalid transport scheme `{0}`")]
+        InvalidTransportScheme(#[source] TransportError, String),
+        #[error("no registered transports for diddoc service endpoint scheme `{}`", 1.to_string())]
+        NoRegisteredTransportsForScheme(#[source] TransportError, TransportScheme),
     }
-
-    // #[derive(Debug)]
-    // pub enum MessagingError {
-    //     SendingMessage,
-    //     ResolvingDid(GenericError),
-    //     DidPeer(DidPeerError),
-    // }
-
-    // impl Display for MessagingError {
-    //     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-    //         match self {
-    //             MessagingError::SendingMessage => write!(f, "Failed to send message"),
-    //             MessagingError::ResolvingDid(_err) => write!(f, "Error Resolving DID"),
-    //             MessagingError::DidPeer(_err) => write!(f, "Error with Peer DID"),
-    //         }
-    //     }
-    // }
-
-    // impl error::Error for MessagingError {
-    //     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-    //         match self {
-    //             MessagingError::ResolvingDid(err) => Some(err.as_ref()),
-    //             MessagingError::DidPeer(err) => Some(err),
-    //             MessagingError::SendingMessage => None,
-    //         }
-    //     }
-    // }
-
-    #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-    pub enum TransportProtocol {
-        HTTP,
-        WS,
-    }
-
-    pub const PREFERRED_PROTOCOL_ORDER: [TransportProtocol; 2] =
-        [TransportProtocol::WS, TransportProtocol::HTTP];
 
     // pub async fn send_message(
     //     message: AriesMessage,
@@ -107,9 +74,10 @@ pub mod messaging_module {
         message: &AriesMessage,
         sender_did: PeerDid<Numalgo4>,
         receiver_did: Did,
-        preferred_transports: Option<Vec<TransportProtocol>>,
+        _preferred_transports: Option<&[TransportScheme]>,
         wallet: &impl BaseWallet,
         did_resolver_registry: did_resolver_registry::ResolverRegistry,
+        transport_registry: TransportRegistry,
     ) -> Result<(), MessagingError> {
         debug!(
             "Sending Aries Message {}
@@ -126,6 +94,10 @@ pub mod messaging_module {
         let sender_did_document = sender_did
             .resolve_did_doc()
             .map_err(|err| MessagingError::DidResolutionPeerDid(err, sender_did.to_string()))?;
+
+        // TODO: need to provide a way of iterating through all available services, in order of transport preference, instead of just taking the first available service. This would also allow us additional services if one fails.
+        // Allow override of default preferred transport scheme order (as protocols may dictate or prefer specific protocols)
+        // let protocols_to_try = preferred_transports.unwrap_or(PREFERRED_PROTOCOL_ORDER.to_vec());
 
         let receiver_service = receiver_did_document
             .get_service_of_type(&ServiceType::DIDCommV1)
@@ -146,7 +118,31 @@ pub mod messaging_module {
             String::from_utf8_lossy(&encrypted_message.0)
         );
 
+        let returned_message = transport_registry
+            .send_message(encrypted_message, receiver_service.service_endpoint())
+            .map_err(|err| match err {
+                TransportError::InvalidTransportScheme(ref scheme) => {
+                    let new_scheme = String::from(scheme);
+                    MessagingError::InvalidTransportScheme(err, new_scheme)
+                }
+                TransportError::NoRegisteredTransportForScheme(scheme) => {
+                    MessagingError::NoRegisteredTransportsForScheme(err, scheme.to_owned())
+                }
+            })?;
+
+        debug!("Sent message");
+
+        // Handle inbound message if one was returned due to a return route transport decorator (DIDComm v1) or return route extension (DIDComm v2)
+        if returned_message.is_some() {
+            debug!("Handling received message returned via return route mechanism");
+            // TODO: Check whether outbound message contained return route field, if not, we should log error upon receiving message and send problem report if possible
+            // let return_route_enabled = false;
+
+            // TODO
+        }
+
         // Event emitting
+        // TODO
         // self.emit_event(MessagingEvents::OutboundMessage(OutboundMessage {
         //     message: message.clone(),
         //     encrypted_message: encrypted_message.clone(),
@@ -154,42 +150,102 @@ pub mod messaging_module {
         //     receiver_did: receiver_did.clone(),
         // }));
 
-        // Allow override of default preferred transport protocol order (as protocols may dictate or prefer specific protocols)
-        let protocols_to_try = preferred_transports.unwrap_or(PREFERRED_PROTOCOL_ORDER.to_vec());
-        // Try all
-        for protocol in protocols_to_try {
-            let transport = self.transport_registry.get_transport(protocol.to_owned());
-            match transport {
-                Some(transport) => {
-                    debug!(
-                        "Sending message via transport with protocol '{:?}'",
-                        protocol
-                    );
-                    let possible_returned_message = transport
-                        .send_message(
-                            receiver_service.service_endpoint().to_owned(),
-                            encrypted_message,
-                        )
-                        .await?;
-                    if possible_returned_message.is_some() {
-                        debug!("Response contained returned DIDComm Message, sending for inbound processing");
-                        self.receive_message(
-                            possible_returned_message.expect("To be returned DIDComm message"),
-                        )
-                        .await?;
-                    }
-                    break;
-                }
-                None => {
-                    trace!("Unable to get transport with protocol '{:?}'", protocol);
-                    continue;
-                }
+        Ok(())
+    }
+
+    #[derive(Error, Debug)]
+    pub enum TransportError {
+        #[error("invalid transport scheme `{0}`")]
+        InvalidTransportScheme(String),
+        #[error("no transport registered for scheme `{}`", 0.to_string())]
+        NoRegisteredTransportForScheme(TransportScheme),
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+    pub enum TransportScheme {
+        HTTP,
+        WS,
+    }
+
+    impl FromStr for TransportScheme {
+        type Err = TransportError;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            match s.to_lowercase().as_str() {
+                "http" | "https" => Ok(TransportScheme::HTTP),
+                "ws" | "wss" => Ok(TransportScheme::WS),
+                _ => Err(TransportError::InvalidTransportScheme(String::from(s))),
             }
         }
+    }
 
-        // TODO: Handle returned messages (via return-route decorator/extension)
+    pub const PREFERRED_TRANSPORT_SCHEME_ORDER: [TransportScheme; 2] =
+        [TransportScheme::WS, TransportScheme::HTTP];
 
-        Ok(())
+    struct TransportRegistry {
+        transports: HashMap<TransportScheme, Box<dyn Transport>>,
+    }
+
+    impl TransportRegistry {
+        fn new() -> Self {
+            Self {
+                transports: HashMap::new(),
+            }
+        }
+        fn register_transport(mut self, transport: impl Transport + 'static) -> Self {
+            self.transports
+                .insert(transport.get_scheme(), Box::new(transport));
+            self
+        }
+
+        fn get_supported_schemes(&self) -> Vec<&TransportScheme> {
+            self.transports.keys().collect()
+        }
+        fn send_message(
+            &self,
+            message: EncryptionEnvelope,
+            endpoint: &Url,
+        ) -> Result<Option<Jwe>, TransportError> {
+            let scheme = TransportScheme::from_str(endpoint.scheme())?;
+            let transport_option = self.transports.get(&scheme);
+
+            match transport_option {
+                Some(transport) => Ok(transport.send_message(message, endpoint)),
+                None => Err(TransportError::NoRegisteredTransportForScheme(scheme)),
+            }
+        }
+    }
+
+    pub trait Transport {
+        fn get_scheme(&self) -> TransportScheme;
+        fn send_message(&self, message: EncryptionEnvelope, endpoint: &Url) -> Option<Jwe>;
+    }
+
+    pub trait InboundTransport {
+        // fn new that takes inbound_message() method
+    }
+
+    struct HttpTransport {}
+
+    impl HttpTransport {
+        fn new() -> Self {
+            Self {}
+        }
+    }
+
+    impl Transport for HttpTransport {
+        fn get_scheme(&self) -> TransportScheme {
+            TransportScheme::HTTP
+        }
+
+        fn send_message(&self, message: EncryptionEnvelope, endpoint: &Url) -> Option<Jwe> {
+            debug!(
+                "Sending message via HTTP Transport to endpoint `{}`",
+                endpoint
+            );
+
+            debug!("Sent message via HTTP Transport to endpoint `{}`", endpoint);
+            None
+        }
     }
 
     #[cfg(test)]
@@ -201,7 +257,6 @@ pub mod messaging_module {
         #[test]
         fn test_encrypt_message() {
             test_init();
-            debug!("{}", test_error().err().unwrap());
         }
     }
 }
