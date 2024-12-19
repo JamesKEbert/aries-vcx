@@ -65,16 +65,16 @@ pub struct DidRecordData {
 /// Otherwise, DID resolution should be done at runtime.
 ///
 /// Takes a generic `S` which is any valid [`VCXFrameworkStorage`] instance.
-struct DidRepository<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> {
+pub struct DidRepository<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> {
     store: S,
 }
 
 impl<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> DidRepository<S> {
-    fn new(store: S) -> Self {
+    pub fn new(store: S) -> Self {
         Self { store }
     }
 
-    fn add_or_update_record(
+    pub fn add_or_update_record(
         &mut self,
         record: Record<DidRecordData, DidRecordTagKeys>,
     ) -> Result<(), DidRepositoryError> {
@@ -87,7 +87,7 @@ impl<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> DidRepository<S> {
         Ok(())
     }
 
-    fn get_record(
+    pub fn get_record(
         &self,
         did: &str,
     ) -> Result<Option<Record<DidRecordData, DidRecordTagKeys>>, DidRepositoryError> {
@@ -100,7 +100,7 @@ impl<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> DidRepository<S> {
         Ok(record)
     }
 
-    fn get_all_records(
+    pub fn get_all_records(
         &self,
     ) -> Result<Vec<Record<DidRecordData, DidRecordTagKeys>>, DidRepositoryError> {
         trace!("Getting all DidRecords...");
@@ -112,7 +112,7 @@ impl<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> DidRepository<S> {
         Ok(records)
     }
 
-    fn search_records(
+    pub fn search_records(
         &self,
         tag_key: DidRecordTagKeys,
         tag_value: String,

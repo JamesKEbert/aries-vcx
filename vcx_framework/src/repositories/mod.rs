@@ -1,2 +1,3 @@
-#[cfg(feature = "did_repository")]
 pub mod did_repository;
+
+pub mod connection_repository;

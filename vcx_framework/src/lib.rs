@@ -23,15 +23,11 @@ pub mod error {
 }
 
 pub mod messaging_module {
-    use std::{clone, collections::HashMap, str::FromStr};
-
     use thiserror::Error;
 
     use aries_vcx::{
         aries_vcx_wallet::wallet::{askar::packing_types::Jwe, base_wallet::BaseWallet},
-        did_doc::schema::{
-            self, service::typed::ServiceType, utils::error::DidDocumentLookupError,
-        },
+        did_doc::schema::{service::typed::ServiceType, utils::error::DidDocumentLookupError},
         did_parser_nom::Did,
         did_peer::{
             error::DidPeerError,
@@ -42,7 +38,18 @@ pub mod messaging_module {
         utils::encryption_envelope::EncryptionEnvelope,
     };
     use did_resolver_registry::GenericError;
-    use url::Url;
+    use uuid::Uuid;
+
+    use crate::{
+        repositories::{
+            connection_repository::{
+                ConnectionRecordData, ConnectionRecordTagKeys, ConnectionRepository,
+            },
+            did_repository::{DidRecordData, DidRecordTagKeys, DidRepository},
+        },
+        storage::{base::VCXFrameworkStorage, record::Record},
+        transport::{TransportError, TransportRegistry, TransportScheme},
+    };
 
     #[derive(Error, Debug)]
     pub enum MessagingError {
@@ -60,14 +67,50 @@ pub mod messaging_module {
         InvalidTransportScheme(#[source] TransportError, String),
         #[error("no registered transports for diddoc service endpoint scheme `{}`", 1.to_string())]
         NoRegisteredTransportsForScheme(#[source] TransportError, TransportScheme),
+        #[error("connection record not found for id `{0}`")]
+        ConnectionRecordNotFound(Uuid),
     }
 
-    // pub async fn send_message(
-    //     message: AriesMessage,
-    //     connectionId: Uuid,
-    //     preferred_transports: Option<Vec<TransportProtocol>>,
-    // ) -> Result<(), MessagingError> {
-    // }
+    pub async fn send_message(
+        message: &AriesMessage,
+        connection_id: &Uuid,
+        _preferred_transports: Option<&[TransportScheme]>,
+        wallet: &impl BaseWallet,
+        did_resolver_registry: did_resolver_registry::ResolverRegistry,
+        transport_registry: TransportRegistry,
+        connection_repository: ConnectionRepository<
+            impl VCXFrameworkStorage<ConnectionRecordData, ConnectionRecordTagKeys>,
+        >,
+        did_repository: DidRepository<impl VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>>,
+    ) -> Result<(), MessagingError> {
+        info!(
+            "Sending Aries Message to connection `{}`:
+        {:?}",
+            connection_id, message
+        );
+
+        let connection_record: Record<ConnectionRecordData, ConnectionRecordTagKeys> =
+            connection_repository
+                .get_record(connection_id)
+                .map_err(|_| MessagingError::ConnectionRecordNotFound(connection_id.clone()))?
+                .ok_or(MessagingError::ConnectionRecordNotFound(
+                    connection_id.clone(),
+                ))?;
+
+        // TODO Save DIDs in DID Repository
+
+        send_message_by_did(
+            message,
+            connection_record.data.our_did,
+            connection_record.data.their_did,
+            _preferred_transports,
+            wallet,
+            did_resolver_registry,
+            transport_registry,
+        )
+        .await?;
+        Ok(())
+    }
 
     // Should this be restricted to sender_did being a peer did? (probably not)
     async fn send_message_by_did(
@@ -126,7 +169,7 @@ pub mod messaging_module {
                     MessagingError::InvalidTransportScheme(err, new_scheme)
                 }
                 TransportError::NoRegisteredTransportForScheme(scheme) => {
-                    MessagingError::NoRegisteredTransportsForScheme(err, scheme.to_owned())
+                    MessagingError::NoRegisteredTransportsForScheme(err, scheme)
                 }
             })?;
 
@@ -153,101 +196,6 @@ pub mod messaging_module {
         Ok(())
     }
 
-    #[derive(Error, Debug)]
-    pub enum TransportError {
-        #[error("invalid transport scheme `{0}`")]
-        InvalidTransportScheme(String),
-        #[error("no transport registered for scheme `{}`", 0.to_string())]
-        NoRegisteredTransportForScheme(TransportScheme),
-    }
-
-    #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-    pub enum TransportScheme {
-        HTTP,
-        WS,
-    }
-
-    impl FromStr for TransportScheme {
-        type Err = TransportError;
-        fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match s.to_lowercase().as_str() {
-                "http" | "https" => Ok(TransportScheme::HTTP),
-                "ws" | "wss" => Ok(TransportScheme::WS),
-                _ => Err(TransportError::InvalidTransportScheme(String::from(s))),
-            }
-        }
-    }
-
-    pub const PREFERRED_TRANSPORT_SCHEME_ORDER: [TransportScheme; 2] =
-        [TransportScheme::WS, TransportScheme::HTTP];
-
-    struct TransportRegistry {
-        transports: HashMap<TransportScheme, Box<dyn Transport>>,
-    }
-
-    impl TransportRegistry {
-        fn new() -> Self {
-            Self {
-                transports: HashMap::new(),
-            }
-        }
-        fn register_transport(mut self, transport: impl Transport + 'static) -> Self {
-            self.transports
-                .insert(transport.get_scheme(), Box::new(transport));
-            self
-        }
-
-        fn get_supported_schemes(&self) -> Vec<&TransportScheme> {
-            self.transports.keys().collect()
-        }
-        fn send_message(
-            &self,
-            message: EncryptionEnvelope,
-            endpoint: &Url,
-        ) -> Result<Option<Jwe>, TransportError> {
-            let scheme = TransportScheme::from_str(endpoint.scheme())?;
-            let transport_option = self.transports.get(&scheme);
-
-            match transport_option {
-                Some(transport) => Ok(transport.send_message(message, endpoint)),
-                None => Err(TransportError::NoRegisteredTransportForScheme(scheme)),
-            }
-        }
-    }
-
-    pub trait Transport {
-        fn get_scheme(&self) -> TransportScheme;
-        fn send_message(&self, message: EncryptionEnvelope, endpoint: &Url) -> Option<Jwe>;
-    }
-
-    pub trait InboundTransport {
-        // fn new that takes inbound_message() method
-    }
-
-    struct HttpTransport {}
-
-    impl HttpTransport {
-        fn new() -> Self {
-            Self {}
-        }
-    }
-
-    impl Transport for HttpTransport {
-        fn get_scheme(&self) -> TransportScheme {
-            TransportScheme::HTTP
-        }
-
-        fn send_message(&self, message: EncryptionEnvelope, endpoint: &Url) -> Option<Jwe> {
-            debug!(
-                "Sending message via HTTP Transport to endpoint `{}`",
-                endpoint
-            );
-
-            debug!("Sent message via HTTP Transport to endpoint `{}`", endpoint);
-            None
-        }
-    }
-
     #[cfg(test)]
     mod tests {
         use crate::test_init;
@@ -263,6 +211,7 @@ pub mod messaging_module {
 
 pub mod repositories;
 pub mod storage;
+pub mod transport;
 
 #[cfg(test)]
 fn test_init() {
