@@ -63,10 +63,12 @@ pub mod messaging_module {
         EncryptMessage(#[source] AriesVcxError),
         #[error("error decrypting message")]
         DecryptMessage(#[source] AriesVcxError),
-        #[error("invalid transport scheme `{0}`")]
-        InvalidTransportScheme(#[source] TransportError, String),
-        #[error("no registered transports for diddoc service endpoint scheme `{}`", 1.to_string())]
-        NoRegisteredTransportsForScheme(#[source] TransportError, TransportScheme),
+        #[error("transport error while sending message")]
+        OutboundTransportError(#[source] TransportError),
+        // #[error("invalid transport scheme `{0}`")]
+        // InvalidTransportScheme(#[source] TransportError, String),
+        // #[error("no registered transports for diddoc service endpoint scheme `{}`", 1.to_string())]
+        // NoRegisteredTransportsForScheme(#[source] TransportError, TransportScheme),
         #[error("connection record not found for id `{0}`")]
         ConnectionRecordNotFound(Uuid),
     }
@@ -97,7 +99,7 @@ pub mod messaging_module {
                     connection_id.clone(),
                 ))?;
 
-        // TODO Save DIDs in DID Repository
+        // TODO Save DIDs in DID Repository (important for finding relevant connection on inbound message)
 
         send_message_by_did(
             message,
@@ -162,16 +164,12 @@ pub mod messaging_module {
         );
 
         let returned_message = transport_registry
-            .send_message(encrypted_message, receiver_service.service_endpoint())
-            .map_err(|err| match err {
-                TransportError::InvalidTransportScheme(ref scheme) => {
-                    let new_scheme = String::from(scheme);
-                    MessagingError::InvalidTransportScheme(err, new_scheme)
-                }
-                TransportError::NoRegisteredTransportForScheme(scheme) => {
-                    MessagingError::NoRegisteredTransportsForScheme(err, scheme)
-                }
-            })?;
+            .send_message(
+                encrypted_message,
+                receiver_service.service_endpoint().to_owned(),
+            )
+            .await
+            .map_err(MessagingError::OutboundTransportError)?;
 
         debug!("Sent message");
 
@@ -198,13 +196,115 @@ pub mod messaging_module {
 
     #[cfg(test)]
     mod tests {
-        use crate::test_init;
+        use std::str::FromStr;
+
+        use aries_vcx::{
+            aries_vcx_wallet::wallet::{
+                askar::{
+                    askar_wallet_config::AskarWalletConfig,
+                    key_method::{ArgonLevel, AskarKdfMethod, KeyMethod},
+                },
+                base_wallet::ManageWallet,
+            },
+            did_peer::resolver::PeerDidResolver,
+            messages::msg_fields::protocols::trust_ping::ping::{
+                Ping, PingContent, PingDecorators,
+            },
+            protocols::did_exchange::state_machine::helpers::create_peer_did_4,
+        };
+        use did_resolver_registry::ResolverRegistry;
+        use url::Url;
+
+        use crate::{
+            repositories::connection_repository, storage::in_memory_storage::InMemoryStorage,
+            test_init, transport::HttpTransport,
+        };
 
         use super::*;
 
-        #[test]
-        fn test_encrypt_message() {
+        pub const IN_MEMORY_DB_URL: &str = "sqlite://:memory:";
+        pub const DEFAULT_WALLET_PROFILE: &str = "aries_framework_vcx_default";
+        pub const DEFAULT_ASKAR_KEY_METHOD: KeyMethod = KeyMethod::DeriveKey {
+            inner: AskarKdfMethod::Argon2i {
+                inner: (ArgonLevel::Interactive),
+            },
+        };
+
+        #[tokio::test]
+        async fn test_send_message() {
             test_init();
+
+            let connection_id = Uuid::new_v4();
+            let message_content = PingContent::builder().response_requested(true).build();
+            let message_decorators = PingDecorators::builder().build();
+            let message = AriesMessage::TrustPing(
+                Ping::builder()
+                    .id(connection_id.to_string())
+                    .decorators(message_decorators)
+                    .content(message_content)
+                    .build(),
+            );
+
+            let wallet_config = AskarWalletConfig {
+                db_url: IN_MEMORY_DB_URL.to_string(),
+                key_method: DEFAULT_ASKAR_KEY_METHOD,
+                pass_key: "sample_pass_key".to_string(),
+                profile: DEFAULT_WALLET_PROFILE.to_string(),
+            };
+            let wallet = wallet_config.create_wallet().await.unwrap();
+
+            let did_peer_resolver = PeerDidResolver::new();
+            let did_resolver_registry =
+                ResolverRegistry::new().register_resolver("peer".into(), did_peer_resolver);
+
+            let transport_registry =
+                TransportRegistry::new().register_transport(HttpTransport::new());
+
+            let in_memory_storage =
+                InMemoryStorage::<ConnectionRecordData, ConnectionRecordTagKeys>::new();
+            let mut connection_repository = ConnectionRepository::new(in_memory_storage);
+
+            let (our_did, _our_verkey) = create_peer_did_4(
+                &wallet,
+                Url::from_str("http://example.com").unwrap(),
+                vec![],
+            )
+            .await
+            .unwrap();
+            let (their_did, _their_verkey) = create_peer_did_4(
+                &wallet,
+                Url::from_str("http://example.com").unwrap(),
+                vec![],
+            )
+            .await
+            .unwrap();
+
+            connection_repository
+                .add_or_update_record(Record::new(
+                    connection_id.to_string(),
+                    ConnectionRecordData {
+                        our_did,
+                        their_did: their_did.did().clone(),
+                    },
+                    None,
+                ))
+                .unwrap();
+
+            let in_memory_storage_dids = InMemoryStorage::<DidRecordData, DidRecordTagKeys>::new();
+            let mut did_repository = DidRepository::new(in_memory_storage_dids);
+
+            send_message(
+                &message,
+                &connection_id,
+                Some(&[TransportScheme::HTTP, TransportScheme::WS]),
+                &wallet,
+                did_resolver_registry,
+                transport_registry,
+                connection_repository,
+                did_repository,
+            )
+            .await
+            .unwrap()
         }
     }
 }
