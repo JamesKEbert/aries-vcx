@@ -1,53 +1,20 @@
-use std::{
-    error,
-    fmt::{Display, Formatter},
-};
-
 use serde::{Deserialize, Serialize};
 
 use crate::storage::{base::VCXFrameworkStorage, error::StorageError, record::Record};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum DidRepositoryError {
-    AddOrUpdateRecordFailed(StorageError),
-    GetRecordFailed(StorageError),
-    GetAllRecordsFailed(StorageError),
-    SearchRecordsFailed(StorageError),
-    DeleteRecordFailed(StorageError),
-}
-
-impl Display for DidRepositoryError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DidRepositoryError::AddOrUpdateRecordFailed(_err) => {
-                write!(f, "Failed to add or update record")
-            }
-            DidRepositoryError::GetRecordFailed(_err) => {
-                write!(f, "Failed to get Record")
-            }
-            DidRepositoryError::GetAllRecordsFailed(_err) => {
-                write!(f, "Failed to get all Record")
-            }
-            DidRepositoryError::SearchRecordsFailed(_err) => {
-                write!(f, "Failed to search Records")
-            }
-            DidRepositoryError::DeleteRecordFailed(_err) => {
-                write!(f, "Failed to delete record")
-            }
-        }
-    }
-}
-
-impl error::Error for DidRepositoryError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match *self {
-            DidRepositoryError::AddOrUpdateRecordFailed(ref err) => Some(err),
-            DidRepositoryError::GetRecordFailed(ref err) => Some(err),
-            DidRepositoryError::GetAllRecordsFailed(ref err) => Some(err),
-            DidRepositoryError::SearchRecordsFailed(ref err) => Some(err),
-            DidRepositoryError::DeleteRecordFailed(ref err) => Some(err),
-        }
-    }
+    #[error("Failed to add or update record")]
+    AddOrUpdateRecordFailed(#[source] StorageError),
+    #[error("Failed to get Record")]
+    GetRecordFailed(#[source] StorageError),
+    #[error("Failed to get all Records")]
+    GetAllRecordsFailed(#[source] StorageError),
+    #[error("Failed to search Records")]
+    SearchRecordsFailed(#[source] StorageError),
+    #[error("Failed to delete record")]
+    DeleteRecordFailed(#[source] StorageError),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
