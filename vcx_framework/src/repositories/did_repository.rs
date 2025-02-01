@@ -32,12 +32,12 @@ pub struct DidRecordData {
 /// Otherwise, DID resolution should be done at runtime.
 ///
 /// Takes a generic `S` which is any valid [`VCXFrameworkStorage`] instance.
-pub struct DidRepository<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> {
-    store: S,
+pub struct DidRepository {
+    store: Box<dyn VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>>,
 }
 
-impl<S: VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>> DidRepository<S> {
-    pub fn new(store: S) -> Self {
+impl DidRepository {
+    pub fn new(store: Box<dyn VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>>) -> Self {
         Self { store }
     }
 
@@ -118,7 +118,7 @@ mod tests {
     fn did_repository() {
         test_init();
         let in_memory_storage = InMemoryStorage::<DidRecordData, DidRecordTagKeys>::new();
-        let mut did_repository = DidRepository::new(in_memory_storage);
+        let mut did_repository = DidRepository::new(Box::new(in_memory_storage));
         let did = String::from("did:peer:4zQmcQCH8nWEBBA6BpSEDxHyhPwHdi5CVGcvsZcjhb618zbA:z5CTtVoAxKjH1V1sKizLy5kLvV6AbmACYfcGmfVUDGn4A7BpnVQEESXEYYUG7W479kDHaqLnk7NJuu4w7ftTd9REipB2CQgW9fjzPvmsXyyHzot9o1tgYHNnqFDXgCXwFYJfjkzz3m6mex1WMN4XHWWNM4NB7exDA2maVGis7gJnVAiNrBExaihyeKJ4nBXrB3ArQ1TyuZ39F9qTeCSrBntTTa85wtUtHz5M1oE7Sj1CZeAEQzDnAMToP9idSrSXUo5z8q9Un325d8MtQgxyKGW2a9VYyW189C722GKQbGQSU3dRSwCanVHJwCh9q2G2eNVPeuydAHXmouCUCq3cVHeUkatv73DSoBV17LEJgq8dAYfvSAutG7LFyvrRW5wNjcQMT7WdFHRCqhtzz18zu6fSTQWM4PQPLMVEaKbs51EeYGiGurhu1ChQMjXqnpcRcpCP7RAEgyWSjMER6e3gdCVsBhQSoqGk1UN8NfVah8pxGg2i5Gd1754Ys6aBEhTashFa47Ke7oPoZ6LZiRMETYhUr1cQY65TQhMzyrR6RzLudeRVgcRdKiTTmP2fFi5H8nCHPSGb4wncUxgn3N5CbFaUC");
         let data = DidRecordData { did: did.clone() };
         let record = Record::new(did.clone(), data, None);
@@ -149,7 +149,7 @@ mod tests {
     fn test_search_did_repository() {
         test_init();
         let in_memory_storage = InMemoryStorage::<DidRecordData, DidRecordTagKeys>::new();
-        let mut did_repository = DidRepository::new(in_memory_storage);
+        let mut did_repository = DidRepository::new(Box::new(in_memory_storage));
         let did = String::from("did:peer:4zQmcQCH8nWEBBA6BpSEDxHyhPwHdi5CVGcvsZcjhb618zbA:z5CTtVoAxKjH1V1sKizLy5kLvV6AbmACYfcGmfVUDGn4A7BpnVQEESXEYYUG7W479kDHaqLnk7NJuu4w7ftTd9REipB2CQgW9fjzPvmsXyyHzot9o1tgYHNnqFDXgCXwFYJfjkzz3m6mex1WMN4XHWWNM4NB7exDA2maVGis7gJnVAiNrBExaihyeKJ4nBXrB3ArQ1TyuZ39F9qTeCSrBntTTa85wtUtHz5M1oE7Sj1CZeAEQzDnAMToP9idSrSXUo5z8q9Un325d8MtQgxyKGW2a9VYyW189C722GKQbGQSU3dRSwCanVHJwCh9q2G2eNVPeuydAHXmouCUCq3cVHeUkatv73DSoBV17LEJgq8dAYfvSAutG7LFyvrRW5wNjcQMT7WdFHRCqhtzz18zu6fSTQWM4PQPLMVEaKbs51EeYGiGurhu1ChQMjXqnpcRcpCP7RAEgyWSjMER6e3gdCVsBhQSoqGk1UN8NfVah8pxGg2i5Gd1754Ys6aBEhTashFa47Ke7oPoZ6LZiRMETYhUr1cQY65TQhMzyrR6RzLudeRVgcRdKiTTmP2fFi5H8nCHPSGb4wncUxgn3N5CbFaUC");
         let data = DidRecordData { did: did.clone() };
         let mut tags = HashMap::new();

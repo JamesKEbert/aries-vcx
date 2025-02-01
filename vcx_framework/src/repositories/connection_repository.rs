@@ -37,16 +37,15 @@ pub struct ConnectionRecordData {
 /// The `ConnectionRepository` stores all connection records and provides methods for creating, updating, searching, and deleting them.
 ///
 /// Takes a generic `S` which is any valid [`VCXFrameworkStorage`] instance.
-pub struct ConnectionRepository<
-    S: VCXFrameworkStorage<ConnectionRecordData, ConnectionRecordTagKeys>,
-> {
-    store: S,
+pub struct ConnectionRepository {
+    // Perhaps this doesn't have to be boxed to avoid dynamic dispatch, but I struggled to get that to work. If you can do it better, please do!
+    store: Box<dyn VCXFrameworkStorage<ConnectionRecordData, ConnectionRecordTagKeys>>,
 }
 
-impl<S: VCXFrameworkStorage<ConnectionRecordData, ConnectionRecordTagKeys>>
-    ConnectionRepository<S>
-{
-    pub fn new(store: S) -> Self {
+impl ConnectionRepository {
+    pub fn new(
+        store: Box<dyn VCXFrameworkStorage<ConnectionRecordData, ConnectionRecordTagKeys>>,
+    ) -> Self {
         Self { store }
     }
 

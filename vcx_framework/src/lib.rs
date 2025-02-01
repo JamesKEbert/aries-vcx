@@ -22,6 +22,52 @@ pub mod error {
     impl std::error::Error for VCXFrameworkError {}
 }
 
+pub mod connection_service {
+    use std::sync::Arc;
+
+    use aries_vcx::aries_vcx_wallet::wallet::base_wallet::BaseWallet;
+    use thiserror::Error;
+
+    use crate::{
+        repositories::{
+            connection_repository::{
+                ConnectionRecordData, ConnectionRecordTagKeys, ConnectionRepository,
+            },
+            did_repository::{DidRecordData, DidRecordTagKeys, DidRepository},
+        },
+        storage::base::VCXFrameworkStorage,
+    };
+
+    #[derive(Error, Debug)]
+    pub enum ConnectionServiceError {
+        // #[error("invalid transport scheme `{0}`")]
+        // InvalidTransportScheme(#[source] TransportError, String),
+    }
+
+    pub struct ConnectionService<W: BaseWallet> {
+        did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
+        connection_repository: Arc<ConnectionRepository>,
+        did_repository: Arc<DidRepository>,
+        wallet: Arc<W>,
+    }
+
+    impl<W: BaseWallet> ConnectionService<W> {
+        pub fn new(
+            did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
+            connection_repository: Arc<ConnectionRepository>,
+            did_repository: Arc<DidRepository>,
+            wallet: Arc<W>,
+        ) -> Self {
+            Self {
+                did_resolver_registry,
+                connection_repository,
+                did_repository,
+                wallet,
+            }
+        }
+    }
+}
+
 pub mod messaging_service {
     use std::sync::Arc;
 
@@ -105,12 +151,8 @@ pub mod messaging_service {
             message: &AriesMessage,
             connection_id: &Uuid,
             _preferred_transports: Option<&[TransportScheme]>,
-            connection_repository: ConnectionRepository<
-                impl VCXFrameworkStorage<ConnectionRecordData, ConnectionRecordTagKeys>,
-            >,
-            did_repository: DidRepository<
-                impl VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>,
-            >,
+            connection_repository: ConnectionRepository,
+            did_repository: DidRepository,
         ) -> Result<(), MessagingError> {
             info!(
                 "Sending Aries Message to connection `{}`:
@@ -127,6 +169,7 @@ pub mod messaging_service {
                     ))?;
 
             // TODO Save DIDs in DID Repository (important for finding relevant connection on inbound message)
+            // Actually -- we should check for DID on connection_record -- it should be set at connection record creation
 
             self.send_message_by_did(
                 message,
@@ -290,7 +333,7 @@ pub mod messaging_service {
 
             let in_memory_storage =
                 InMemoryStorage::<ConnectionRecordData, ConnectionRecordTagKeys>::new();
-            let mut connection_repository = ConnectionRepository::new(in_memory_storage);
+            let mut connection_repository = ConnectionRepository::new(Box::new(in_memory_storage));
 
             let (our_did, _our_verkey) = create_peer_did_4(
                 &wallet,
@@ -319,7 +362,7 @@ pub mod messaging_service {
                 .unwrap();
 
             let in_memory_storage_dids = InMemoryStorage::<DidRecordData, DidRecordTagKeys>::new();
-            let mut did_repository = DidRepository::new(in_memory_storage_dids);
+            let mut did_repository = DidRepository::new(Box::new(in_memory_storage_dids));
 
             let messaging_service = MessagingService::new(
                 Arc::new(did_resolver_registry),
