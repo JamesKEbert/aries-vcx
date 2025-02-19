@@ -22,8 +22,10 @@ pub enum ConnectionRepositoryError {
     DeleteRecordFailed(#[source] StorageError),
 }
 
+// Invitation DID is here to allow for connection reuse so that connections can be searched by initiating invitation DID
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum ConnectionRecordTagKeys {
+    InvitationDid,
     OurDid,
     TheirDid,
 }
@@ -32,6 +34,7 @@ pub enum ConnectionRecordTagKeys {
 pub struct ConnectionRecordData {
     pub our_did: PeerDid<Numalgo4>,
     pub their_did: Did,
+    pub invitation_did: Did,
 }
 
 /// The `ConnectionRepository` stores all connection records and provides methods for creating, updating, searching, and deleting them.
@@ -78,7 +81,7 @@ impl ConnectionRepository {
             .store
             .get_record(id.to_string().as_str())
             .map_err(ConnectionRepositoryError::AddOrUpdateRecordFailed)?;
-        trace!("Retrieved DidRecord '{:#?}'", record);
+        trace!("Retrieved ConnectionRecord '{:#?}'", record);
         Ok(record)
     }
 
@@ -86,12 +89,12 @@ impl ConnectionRepository {
         &self,
     ) -> Result<Vec<Record<ConnectionRecordData, ConnectionRecordTagKeys>>, ConnectionRepositoryError>
     {
-        trace!("Getting all DidRecords...");
+        trace!("Getting all ConnectionRecords...");
         let records = self
             .store
             .get_all_records()
             .map_err(ConnectionRepositoryError::GetAllRecordsFailed)?;
-        trace!("Got {} DidRecords", { records.len() });
+        trace!("Got {} ConnectionRecords", { records.len() });
         Ok(records)
     }
 
@@ -114,12 +117,12 @@ impl ConnectionRepository {
         Ok(records)
     }
 
-    pub fn delete_record(&self, did: &str) -> Result<(), ConnectionRepositoryError> {
-        trace!("Deleting DidRecord by DID '{}'", did);
+    pub fn delete_record(&self, id: &Uuid) -> Result<(), ConnectionRepositoryError> {
+        trace!("Deleting ConnectionRecord by ID '{}'", id);
         self.store
-            .delete_record(&did)
+            .delete_record(&id.to_string().as_str())
             .map_err(ConnectionRepositoryError::DeleteRecordFailed)?;
-        trace!("Deleted DidRecord '{}'", did);
+        trace!("Deleted ConnectionRecord '{}'", id);
         Ok(())
     }
 }

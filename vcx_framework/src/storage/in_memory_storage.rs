@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn test_add_and_read_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn test_add_duplicate() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn test_add_or_update_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn test_update_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn test_update_record_no_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let updated_record = Record::new(
             id.clone(),
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn test_get_all_records() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn test_search_records() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let mut tags = HashMap::new();
         tags.insert(TestTagKeys::TestKey, String::from("testkeyvalue"));
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn test_delete_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn test_delete_record_already_deleted() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),

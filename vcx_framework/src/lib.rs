@@ -28,8 +28,15 @@ pub mod connection_service {
     use aries_vcx::{
         aries_vcx_wallet::wallet::base_wallet::BaseWallet,
         errors::error::AriesVcxError,
-        handlers::out_of_band::receiver::OutOfBandReceiver,
-        messages::decorators::transport::{ReturnRoute, Transport},
+        handlers::out_of_band::{receiver::OutOfBandReceiver, sender::OutOfBandSender},
+        messages::{
+            decorators::transport::{ReturnRoute, Transport},
+            msg_fields::protocols::out_of_band::invitation::OobService,
+            msg_types::{
+                protocols::did_exchange::{DidExchangeType, DidExchangeTypeV1},
+                Protocol,
+            },
+        },
         protocols::did_exchange::state_machine::{
             generic::GenericDidExchange,
             helpers::create_peer_did_4,
@@ -47,8 +54,13 @@ pub mod connection_service {
         repositories::{
             connection_repository::{
                 ConnectionRecordData, ConnectionRecordTagKeys, ConnectionRepository,
+                ConnectionRepositoryError,
             },
             did_repository::{DidRecordData, DidRecordTagKeys, DidRepository},
+            invitation_repository::{
+                InvitationRecordData, InvitationRecordTagKeys, InvitationRepository,
+                InvitationRepositoryError,
+            },
         },
         storage::{base::VCXFrameworkStorage, record::Record},
         transport::TransportScheme,
@@ -66,11 +78,18 @@ pub mod connection_service {
         ErrorCreateConnectionRequest(#[source] AriesVcxError),
         #[error("Error Sending Message")]
         ErrorSendingMessage(#[source] MessagingError),
+        #[error("Connection Record Storage Error")]
+        ConnectionStorageError(#[source] ConnectionRepositoryError),
+        #[error("Invitation Record Storage Error")]
+        InvitationStorageError(#[source] InvitationRepositoryError),
+        #[error("Error with creating Out Of Band Invitation")]
+        OutOfBandCreation(#[source] AriesVcxError),
     }
 
     pub struct ConnectionService<W: BaseWallet> {
         did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
         connection_repository: Arc<ConnectionRepository>,
+        invitation_repository: Arc<InvitationRepository>,
         did_repository: Arc<DidRepository>,
         messaging_service: Arc<MessagingService<W>>,
         wallet: Arc<W>,
@@ -82,6 +101,7 @@ pub mod connection_service {
         pub fn new(
             did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
             connection_repository: Arc<ConnectionRepository>,
+            invitation_repository: Arc<InvitationRepository>,
             did_repository: Arc<DidRepository>,
             messaging_service: Arc<MessagingService<W>>,
             wallet: Arc<W>,
@@ -91,6 +111,7 @@ pub mod connection_service {
             Self {
                 did_resolver_registry,
                 connection_repository,
+                invitation_repository,
                 did_repository,
                 messaging_service,
                 wallet,
@@ -99,18 +120,63 @@ pub mod connection_service {
             }
         }
 
+        // TODO - have this return an actual oob invitation so that it is more straightforward
+        // TODO - return UUID typed - not "String"
+        pub async fn create_invitation(&self) -> Result<String, ConnectionServiceError> {
+            info!("Creating Out Of Band Invitation");
+            // TODO - invitation should be able to be mediated (routing keys should be provided or generated)
+            // TODO - create_peer_did_4() should []'pmove into peer did 4 implementation
+            let (peer_did, _our_verkey) =
+                create_peer_did_4(self.wallet.as_ref(), self.agent_endpoint.clone(), vec![])
+                    .await
+                    .map_err(ConnectionServiceError::PeerDIDError)?;
+
+            let service = OobService::Did(peer_did.to_string());
+
+            let oob_sender = OutOfBandSender::create()
+                .append_service(&service)
+                .append_handshake_protocol(Protocol::DidExchangeType(DidExchangeType::V1(
+                    DidExchangeTypeV1::new_v1_1(),
+                )))
+                .map_err(ConnectionServiceError::OutOfBandCreation)?;
+
+            info!(
+                "Created Out of Band Invitation {}",
+                oob_sender.invitation_to_json_string()
+            );
+
+            let id = oob_sender.get_id();
+            let mut record_keys = HashMap::new();
+            record_keys.insert(InvitationRecordTagKeys::SelfCreated, true.to_string());
+            let record = Record::new(
+                id.clone(),
+                InvitationRecordData {
+                    invite: oob_sender,
+                    self_created: true,
+                },
+                Some(record_keys),
+            );
+
+            self.invitation_repository
+                .add_or_update_record(record)
+                .map_err(ConnectionServiceError::InvitationStorageError);
+            // TODO -- Emit event
+
+            Ok(id)
+        }
+
         pub async fn connect(
             &self,
             invitation: OutOfBandReceiver,
             mediated: bool,
             specific_mediator_id: Option<Uuid>,
         ) -> Result<(), ConnectionServiceError> {
-            debug!(
+            info!(
                 "Requesting Connection via DID Exchange with invitation {}",
                 invitation
             );
 
-            // TODO - peer did we create here should be able to be mediated (routing keys should be provided or generated)
+            // TODO - peer DID we create here should be able to be mediated (routing keys should be provided or generated)
             // TODO - create_peer_did_4() function should move into peer did 4 implementation
             let (peer_did, _our_verkey) =
                 create_peer_did_4(self.wallet.as_ref(), self.agent_endpoint.clone(), vec![])
@@ -121,7 +187,6 @@ pub mod connection_service {
             let inviter_did = invitation_get_first_did_service(&invitation.oob)
                 .map_err(ConnectionServiceError::NoDIDServiceFound)?;
 
-            // Get DID Exchange version to use based off of invitation handshake protocols
             let version = invitation_get_acceptable_did_exchange_version(&invitation.oob)
                 .map_err(ConnectionServiceError::InvalidDidExchangeVersion)?;
 
@@ -158,16 +223,23 @@ pub mod connection_service {
             let mut record_keys = HashMap::new();
             record_keys.insert(ConnectionRecordTagKeys::OurDid, peer_did.to_string());
             record_keys.insert(ConnectionRecordTagKeys::TheirDid, inviter_did.to_string());
+            record_keys.insert(
+                ConnectionRecordTagKeys::InvitationDid,
+                inviter_did.to_string(),
+            );
             let record = Record::new(
                 connection_id.to_string(),
                 ConnectionRecordData {
                     our_did: peer_did,
-                    their_did: inviter_did,
+                    their_did: inviter_did.clone(),
+                    invitation_did: inviter_did,
                 },
                 Some(record_keys),
             );
 
-            self.connection_repository.add_or_update_record(record);
+            self.connection_repository
+                .add_or_update_record(record)
+                .map_err(ConnectionServiceError::ConnectionStorageError);
 
             //TODO - Emit Event
 
@@ -459,6 +531,7 @@ pub mod messaging_service {
                     ConnectionRecordData {
                         our_did,
                         their_did: their_did.did().clone(),
+                        invitation_did: their_did.did().clone(),
                     },
                     None,
                 ))
