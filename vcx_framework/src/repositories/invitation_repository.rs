@@ -35,10 +35,7 @@ pub struct InvitationRecordData {
 }
 
 /// The `InvitationRepository` stores all Invitation records and provides methods for creating, updating, searching, and deleting them.
-///
-/// Takes a generic `S` which is any valid [`VCXFrameworkStorage`] instance.
 pub struct InvitationRepository {
-    // Perhaps this doesn't have to be boxed to avoid dynamic dispatch, but I struggled to get that to work. If you can do it better, please do!
     store: Box<dyn VCXFrameworkStorage<InvitationRecordData, InvitationRecordTagKeys>>,
 }
 
@@ -122,13 +119,4 @@ impl InvitationRepository {
         trace!("Deleted InvitationRecord '{}'", id);
         Ok(())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{collections::HashMap, str::FromStr};
-
-    use crate::{storage::in_memory_storage::InMemoryStorage, test_init};
-
-    use super::*;
 }

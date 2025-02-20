@@ -30,8 +30,6 @@ pub struct DidRecordData {
 
 /// The `DidRepository` stores all created and known DIDs, and where appropriate, stores full DIDDocs (such as storing a long form did:peer:4 or with TTL caching strategies).
 /// Otherwise, DID resolution should be done at runtime.
-///
-/// Takes a generic `S` which is any valid [`VCXFrameworkStorage`] instance.
 pub struct DidRepository {
     store: Box<dyn VCXFrameworkStorage<DidRecordData, DidRecordTagKeys>>,
 }

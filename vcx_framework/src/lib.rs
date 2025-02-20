@@ -120,9 +120,8 @@ pub mod connection_service {
             }
         }
 
-        // TODO - have this return an actual oob invitation so that it is more straightforward
-        // TODO - return UUID typed - not "String"
-        pub async fn create_invitation(&self) -> Result<String, ConnectionServiceError> {
+        // Out of current scope: single-use invitations and connectionless-style invitations (requests included in invitation)
+        pub async fn create_invitation(&self) -> Result<OutOfBandSender, ConnectionServiceError> {
             info!("Creating Out Of Band Invitation");
             // TODO - invitation should be able to be mediated (routing keys should be provided or generated)
             // TODO - create_peer_did_4() should []'pmove into peer did 4 implementation
@@ -151,7 +150,7 @@ pub mod connection_service {
             let record = Record::new(
                 id.clone(),
                 InvitationRecordData {
-                    invite: oob_sender,
+                    invite: oob_sender.clone(),
                     self_created: true,
                 },
                 Some(record_keys),
@@ -159,10 +158,10 @@ pub mod connection_service {
 
             self.invitation_repository
                 .add_or_update_record(record)
-                .map_err(ConnectionServiceError::InvitationStorageError);
+                .map_err(ConnectionServiceError::InvitationStorageError)?;
             // TODO -- Emit event
 
-            Ok(id)
+            Ok(oob_sender)
         }
 
         pub async fn connect(
