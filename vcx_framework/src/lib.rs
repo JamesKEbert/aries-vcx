@@ -54,7 +54,7 @@ pub mod connection_service {
         repositories::{
             connection_repository::{
                 ConnectionRecordData, ConnectionRecordTagKeys, ConnectionRepository,
-                ConnectionRepositoryError,
+                ConnectionRepositoryError, ConnectionRole,
             },
             did_repository::{DidRecordData, DidRecordTagKeys, DidRepository},
             invitation_repository::{
@@ -169,7 +169,7 @@ pub mod connection_service {
             invitation: OutOfBandReceiver,
             mediated: bool,
             specific_mediator_id: Option<Uuid>,
-        ) -> Result<(), ConnectionServiceError> {
+        ) -> Result<Uuid, ConnectionServiceError> {
             info!(
                 "Requesting Connection via DID Exchange with invitation {}",
                 invitation
@@ -229,6 +229,7 @@ pub mod connection_service {
             let record = Record::new(
                 connection_id.to_string(),
                 ConnectionRecordData {
+                    role: ConnectionRole::Requester,
                     our_did: peer_did,
                     their_did: inviter_did.clone(),
                     invitation_did: inviter_did,
@@ -242,6 +243,11 @@ pub mod connection_service {
 
             //TODO - Emit Event
 
+            Ok(connection_id)
+        }
+
+        pub async fn handle_connection_response(&self) -> Result<(), ConnectionServiceError> {
+            // TODO - Process message
             Ok(())
         }
     }
@@ -341,9 +347,6 @@ pub mod messaging_service {
                 .get_record(&connection_id)
                 .map_err(|_| MessagingError::ConnectionRecordNotFound(connection_id))?
                 .ok_or(MessagingError::ConnectionRecordNotFound(connection_id))?;
-
-            // TODO Save DIDs in DID Repository (important for finding relevant connection on inbound message)
-            // Actually -- we should check for DID on connection_record -- it should be set at connection record creation
 
             self.send_message_to_did(
                 message,
@@ -462,6 +465,7 @@ pub mod messaging_service {
         use url::Url;
 
         use crate::{
+            repositories::connection_repository::ConnectionRole,
             storage::in_memory_storage::InMemoryStorage, test_init, transport::HttpTransport,
         };
 
@@ -528,6 +532,7 @@ pub mod messaging_service {
                 .add_or_update_record(Record::new(
                     connection_id.to_string(),
                     ConnectionRecordData {
+                        role: ConnectionRole::Requester,
                         our_did,
                         their_did: their_did.did().clone(),
                         invitation_did: their_did.did().clone(),
