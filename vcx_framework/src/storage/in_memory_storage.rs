@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, marker::PhantomData};
+use std::{collections::HashMap, hash::Hash, marker::PhantomData, sync::Mutex};
 
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -10,8 +10,8 @@ where
     D: Serialize + DeserializeOwned + std::fmt::Debug,
     TK: Eq + Hash + Clone + std::fmt::Debug + Serialize + DeserializeOwned,
 {
-    records: HashMap<String, String>,
-    tags: Vec<(TK, (String, String))>,
+    records: Mutex<HashMap<String, String>>,
+    tags: Mutex<Vec<(TK, (String, String))>>,
     // PhantomData is used so that the Record type must be determined at `new()`, which is required given that the Record type isn't specified in any of the struct fields.
     // This is done so that the type doesn't have to be inferred or manually set later during use.
     _phantom: PhantomData<D>,
@@ -25,21 +25,26 @@ where
 {
     pub fn new() -> Self {
         InMemoryStorage::<D, TK> {
-            records: HashMap::new(),
-            tags: vec![],
+            records: Mutex::new(HashMap::new()),
+            tags: Mutex::new(vec![]),
             _phantom: PhantomData,
             _phantomtk: PhantomData,
         }
     }
 
-    fn add_keys(&mut self, tags: HashMap<TK, String>, id: &str) {
+    fn add_keys(&self, tags: HashMap<TK, String>, id: &str) {
         for (tag_key, tag_value) in tags {
-            self.tags.push((tag_key, (tag_value, id.to_owned())));
+            self.tags
+                .lock()
+                .expect("an unpoisoned mutex")
+                .push((tag_key, (tag_value, id.to_owned())));
         }
     }
 
-    fn remove_keys(&mut self, id: &str) {
+    fn remove_keys(&self, id: &str) {
         self.tags
+            .lock()
+            .expect("an unpoisoned mutex")
             .retain(|(_tag_key, (_tag_value, stored_id))| id != stored_id);
     }
 }
@@ -49,24 +54,43 @@ where
     D: Serialize + DeserializeOwned + std::fmt::Debug,
     TK: Eq + Hash + Clone + std::fmt::Debug + Serialize + DeserializeOwned,
 {
-    fn add_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError> {
-        if self.records.contains_key(&record.id) {
+    fn add_record(&self, record: Record<D, TK>) -> Result<(), StorageError> {
+        if self
+            .records
+            .lock()
+            .expect("an unpoisoned mutex")
+            .contains_key(&record.id)
+        {
             return Err(StorageError::DuplicateRecord);
         }
-        self.records.insert(record.id.clone(), record.to_string()?);
+        self.records
+            .lock()
+            .expect("an unpoisoned mutex")
+            .insert(record.id.clone(), record.to_string()?);
         self.add_keys(record.get_tags().clone(), &record.id);
 
         Ok(())
     }
-    fn add_or_update_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError> {
-        self.records.insert(record.id.clone(), record.to_string()?);
+    fn add_or_update_record(&self, record: Record<D, TK>) -> Result<(), StorageError> {
+        self.records
+            .lock()
+            .expect("an unpoisoned mutex")
+            .insert(record.id.clone(), record.to_string()?);
         self.remove_keys(&record.id);
         self.add_keys(record.get_tags().to_owned(), &record.id);
         Ok(())
     }
-    fn update_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError> {
-        if self.records.contains_key(&record.id) {
-            self.records.insert(record.id.clone(), record.to_string()?);
+    fn update_record(&self, record: Record<D, TK>) -> Result<(), StorageError> {
+        if self
+            .records
+            .lock()
+            .expect("an unpoisoned mutex")
+            .contains_key(&record.id)
+        {
+            self.records
+                .lock()
+                .expect("an unpoisoned mutex")
+                .insert(record.id.clone(), record.to_string()?);
             self.remove_keys(&record.id);
             self.add_keys(record.get_tags().to_owned(), &record.id);
             Ok(())
@@ -75,16 +99,21 @@ where
         }
     }
     fn get_record(&self, id: &str) -> Result<Option<Record<D, TK>>, StorageError> {
-        let record = self.records.get(id);
-        match record {
-            Some(retrieved_record) => Ok(Some(Record::from_string(retrieved_record)?)),
-            None => Ok(None),
-        }
+        let record = self
+            .records
+            .lock()
+            .expect("an unpoisoned mutex")
+            .get(id)
+            .map(|retrieved_record| Record::from_string(&retrieved_record))
+            .transpose()?;
+        Ok(record)
     }
 
     fn get_all_records(&self) -> Result<Vec<Record<D, TK>>, StorageError> {
         let records = self
             .records
+            .lock()
+            .expect("an unpoisoned mutex")
             .values()
             .map(|retrieved_record| Record::from_string(retrieved_record))
             .collect::<Result<Vec<_>, _>>()?;
@@ -98,6 +127,8 @@ where
     ) -> Result<Vec<Record<D, TK>>, StorageError> {
         let matching_ids: Vec<String> = self
             .tags
+            .lock()
+            .expect("an unpoisoned mutex")
             .iter()
             .filter(|(stored_tag_key, (stored_tag_value, _stored_tag_id))| {
                 tag_key == stored_tag_key && tag_value == stored_tag_value
@@ -113,8 +144,8 @@ where
         Ok(records)
     }
 
-    fn delete_record(&mut self, id: &str) -> Result<(), StorageError> {
-        self.records.remove(id);
+    fn delete_record(&self, id: &str) -> Result<(), StorageError> {
+        self.records.lock().expect("an unpoisoned mutex").remove(id);
         self.remove_keys(id);
 
         Ok(())
@@ -142,7 +173,7 @@ mod tests {
     #[test]
     fn test_add_and_read_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -163,7 +194,7 @@ mod tests {
     #[test]
     fn test_add_duplicate() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -183,7 +214,7 @@ mod tests {
     #[test]
     fn test_add_or_update_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -206,7 +237,7 @@ mod tests {
     #[test]
     fn test_update_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -237,7 +268,7 @@ mod tests {
     #[test]
     fn test_update_record_no_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let updated_record = Record::new(
             id.clone(),
@@ -256,7 +287,7 @@ mod tests {
     #[test]
     fn test_get_all_records() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -274,7 +305,7 @@ mod tests {
     #[test]
     fn test_search_records() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let mut tags = HashMap::new();
         tags.insert(TestTagKeys::TestKey, String::from("testkeyvalue"));
@@ -296,7 +327,7 @@ mod tests {
     #[test]
     fn test_delete_record() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),
@@ -316,7 +347,7 @@ mod tests {
     #[test]
     fn test_delete_record_already_deleted() {
         test_init();
-        let mut in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
+        let in_memory_storage = InMemoryStorage::<TestRecord, TestTagKeys>::new();
         let id = String::from("id1");
         let record = Record::new(
             id.clone(),

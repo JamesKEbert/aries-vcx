@@ -12,13 +12,13 @@ where
     TK: Eq + Hash + Clone + std::fmt::Debug + Serialize + DeserializeOwned,
 {
     /// Adds a record to the storage. Will not update an existing record with the same id, otherwise use [`add_or_update_record()`] instead.
-    fn add_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError>;
+    fn add_record(&self, record: Record<D, TK>) -> Result<(), StorageError>;
 
     /// Adds or updates an existing record to the storage.
-    fn add_or_update_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError>;
+    fn add_or_update_record(&self, record: Record<D, TK>) -> Result<(), StorageError>;
 
     /// Updates a record in the storage. Will not update a non existent record. To update or create if non-existent, use [`add_or_update_record()`] instead.
-    fn update_record(&mut self, record: Record<D, TK>) -> Result<(), StorageError>;
+    fn update_record(&self, record: Record<D, TK>) -> Result<(), StorageError>;
 
     /// Gets a record from the storage by id if it exists.
     fn get_record(&self, id: &str) -> Result<Option<Record<D, TK>>, StorageError>;
@@ -36,5 +36,5 @@ where
     ) -> Result<Vec<Record<D, TK>>, StorageError>;
 
     /// Deletes a record from the storage by id.
-    fn delete_record(&mut self, id: &str) -> Result<(), StorageError>;
+    fn delete_record(&self, id: &str) -> Result<(), StorageError>;
 }
