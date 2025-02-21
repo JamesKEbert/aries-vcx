@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use typed_builder::TypedBuilder;
 
 use crate::decorators::thread::Thread;
@@ -20,6 +21,22 @@ pub enum ReturnRoute {
     All,
     #[serde(rename = "thread")]
     Thread,
+}
+
+/// Parses a String using Serde to retrieve a Transport Decorator if it is present, as this is not possible via AriesMessage. Will error if the string is not parsable by Serde (which should not occur if using a proper DIDComm message) or if the transport decorator is not correctly formatted.
+pub fn get_transport_decorator_from_string(
+    string: &str,
+) -> Result<Option<Transport>, serde_json::Error> {
+    let raw_message: Value = serde_json::from_str(string)?;
+    println!("raw msg {}", raw_message);
+    match &raw_message["~transport"] {
+        Value::Object(_) => {
+            let transport_decorator: Option<Transport> =
+                serde_json::from_value(raw_message["~transport"].clone())?;
+            Ok(transport_decorator)
+        }
+        _ => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -58,5 +75,48 @@ mod tests {
                 "return_route_thread": { "thid": "<thread id>" }
         });
         test_utils::test_serde(transport, expected);
+    }
+
+    #[test]
+    fn test_get_transport_decorator_from_string() {
+        let transport = Transport::builder().return_route(ReturnRoute::All).build();
+        let input_string = r#"
+        {
+            "~transport":{
+                "return_route": "all"
+            }
+        }"#;
+
+        assert_eq!(
+            get_transport_decorator_from_string(input_string)
+                .unwrap()
+                .unwrap(),
+            transport
+        );
+    }
+
+    #[test]
+    fn test_get_transport_decorator_from_string_no_decorator() {
+        let input_string = r#"
+        {
+            "foo": "bar"
+        }"#;
+
+        assert_eq!(
+            get_transport_decorator_from_string(input_string).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_get_transport_decorator_from_string_malphormed_decorator() {
+        let input_string = r#"
+        {
+            "~transport":{
+                "foo": "bar"
+            }
+        }"#;
+
+        assert!(get_transport_decorator_from_string(input_string).is_err());
     }
 }
