@@ -256,10 +256,12 @@ pub mod connection_service {
 pub mod messaging_service {
     use std::sync::Arc;
 
+    use serde::Deserialize;
+    use serde_json::Value;
     use thiserror::Error;
 
     use aries_vcx::{
-        aries_vcx_wallet::wallet::base_wallet::BaseWallet,
+        aries_vcx_wallet::wallet::{askar::packing_types::Jwe, base_wallet::BaseWallet},
         did_doc::schema::{service::typed::ServiceType, utils::error::DidDocumentLookupError},
         did_parser_nom::Did,
         did_peer::{
@@ -267,7 +269,12 @@ pub mod messaging_service {
             peer_did::{numalgos::numalgo4::Numalgo4, PeerDid},
         },
         errors::error::AriesVcxError,
-        messages::AriesMessage,
+        messages::{
+            decorators::transport::Transport,
+            msg_fields::protocols::{did_exchange::DidExchange, out_of_band::OutOfBand},
+            msg_parts::MsgParts,
+            AriesMessage,
+        },
         utils::encryption_envelope::EncryptionEnvelope,
     };
     use did_resolver_registry::GenericError;
@@ -296,6 +303,8 @@ pub mod messaging_service {
         EncryptMessage(#[source] AriesVcxError),
         #[error("error decrypting message")]
         DecryptMessage(#[source] AriesVcxError),
+        #[error("error deserializing message")]
+        Deserialization(#[source] serde_json::Error),
         #[error("transport error while sending message")]
         OutboundTransportError(#[source] TransportError),
         // #[error("invalid transport scheme `{0}`")]
@@ -440,6 +449,61 @@ pub mod messaging_service {
             // }));
 
             Ok(())
+        }
+
+        pub async fn receive_message(&self, encrypted_message: Jwe) -> Option<EncryptionEnvelope> {
+            trace!("Received encrypted message: {:?}", encrypted_message);
+            let decrypted_message_result = EncryptionEnvelope::unpack(
+                self.wallet.as_ref(),
+                serde_json::json!(encrypted_message).to_string().as_bytes(),
+                &None,
+            )
+            .await;
+            if decrypted_message_result.is_err() {
+                error!("Unable to decrypt received message");
+                return None;
+            }
+
+            let (message_string, sender_vk, recipient_vk) =
+                decrypted_message_result.expect("to be valid decrypted message values");
+
+            debug!(
+                "Received inbound message from sender key: {:?}
+                  for recipient key: {:?}
+                  message: {}",
+                sender_vk, recipient_vk, message_string
+            );
+
+            let message_result: Result<AriesMessage, serde_json::Error> =
+                serde_json::from_str(&message_string);
+
+            match message_result {
+                Ok(message) => {
+                    trace!("Deserialized message: {}", message);
+                    // TODO - route to message handlers and await a return message (if any)
+                    // TODO - determine if a message can/should be handled via a return-route-all immediate return
+
+                    let mut return_route_allowed = false;
+
+                    // return match message {
+                    //     AriesMessage::OutOfBand(msg_type) => match msg_type {
+                    //         OutOfBand::HandshakeReuse(msg_type_specific) => {}
+                    //         _ => None,
+                    //     },
+                    //     _ => None,
+                    // };
+                    None
+                }
+                Err(_) => {
+                    // May be helpful to indicate why -- for instance if it's due to an unsupported version, or a malphormed message, etc.
+                    // TODO - add problem report response message if/as appropriate
+                    error!(
+                        "Unable to deserialize received message as a supported AriesMessage: {}",
+                        message_string
+                    );
+                    None
+                }
+            }
         }
     }
 
