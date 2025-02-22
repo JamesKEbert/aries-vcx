@@ -370,6 +370,8 @@ pub mod messaging_service {
         }
 
         // Should this be restricted to sender_did being a peer did? (probably not)
+        /// Send a message to a DID
+        ///
         async fn send_message_to_did(
             &self,
             message: &AriesMessage,
@@ -433,6 +435,24 @@ pub mod messaging_service {
             // Handle inbound message if one was returned due to a return route transport decorator (DIDComm v1) or return route extension (DIDComm v2)
             if returned_message.is_some() {
                 debug!("Handling received message returned via return route mechanism");
+
+                // Determine if a message is allowed to be returned immediately via return route as indicated by a transport decorator. This may be a somewhat simple/naive approach for handling the return route all mechanism as a more complicated session system may be beneficial, but is unnecessarily complex today. This approach _may_ be insufficient for future messages in the thread or connection being immediately returned.
+                let transport_decorator = get_transport_decorator_from_string(&message.to_string())
+                    .map_err(MessagingError::Deserialization);
+                let return_route_allowed = transport_decorator
+                    .expect("to be a valid transport decorator option")
+                    .map_or(false, |transport_decorator| {
+                        if transport_decorator.return_route != ReturnRoute::None {
+                            true
+                        } else {
+                            false
+                        }
+                    });
+
+                if return_route_allowed {
+                    self.receive_message(encrypted_message)
+                } else {
+                }
                 // TODO: Check whether outbound message contained return route field, if not, we should log error upon receiving message and send problem report if possible
                 // let return_route_enabled = false;
 
@@ -451,6 +471,9 @@ pub mod messaging_service {
             Ok(())
         }
 
+        /// Handles an inbound encrypted DIDComm message. Will pass to the appropriate registered protocol handlers.
+        ///
+        /// If the inbound message contains a Transport Decorator with a return route 'All' or 'Thread' then the message can be returned back to the transport to send back immediately on the open connection. Otherwise, the protocol handler should use `send_message()`.
         pub async fn receive_message(&self, encrypted_message: Jwe) -> Option<EncryptionEnvelope> {
             trace!("Received encrypted message: {:?}", encrypted_message);
             let decrypted_message_result = EncryptionEnvelope::unpack(
@@ -483,7 +506,7 @@ pub mod messaging_service {
                     // TODO - route to message handlers and await a return message (if any)
                     // TODO - determine if a message can/should be handled via a return-route-all immediate return
 
-                    // Determine if a message can be delivered immediately via return route as indicated by a transport decorator
+                    // Determine if a message can be delivered immediately via return route as indicated by a transport decorator. This may be a somewhat simple/naive approach for handling the return route all mechanism as a more complicated session system may be beneficial, but is unnecessarily complex today. This approach _may_ be insufficient for future messages in the thread or connection being immediately returned.
                     let transport_decorator_result =
                         get_transport_decorator_from_string(&message_string);
 
@@ -501,6 +524,8 @@ pub mod messaging_service {
                                 false
                             }
                         });
+
+                    // TODO - send to handlers to process messages.
 
                     // return match message {
                     //     AriesMessage::OutOfBand(msg_type) => match msg_type {
