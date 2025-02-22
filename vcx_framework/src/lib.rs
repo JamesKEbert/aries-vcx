@@ -270,7 +270,7 @@ pub mod messaging_service {
         },
         errors::error::AriesVcxError,
         messages::{
-            decorators::transport::Transport,
+            decorators::transport::{get_transport_decorator_from_string, ReturnRoute, Transport},
             msg_fields::protocols::{did_exchange::DidExchange, out_of_band::OutOfBand},
             msg_parts::MsgParts,
             AriesMessage,
@@ -483,7 +483,24 @@ pub mod messaging_service {
                     // TODO - route to message handlers and await a return message (if any)
                     // TODO - determine if a message can/should be handled via a return-route-all immediate return
 
-                    let mut return_route_allowed = false;
+                    // Determine if a message can be delivered immediately via return route as indicated by a transport decorator
+                    let transport_decorator_result =
+                        get_transport_decorator_from_string(&message_string);
+
+                    if transport_decorator_result.is_err() {
+                        error!("Received a malphormed message or contains a malphormed transport decorator");
+                        // TODO - return problem report
+                        return None;
+                    }
+                    let return_route_allowed = transport_decorator_result
+                        .expect("to be a valid transport decorator option")
+                        .map_or(false, |transport_decorator| {
+                            if transport_decorator.return_route != ReturnRoute::None {
+                                true
+                            } else {
+                                false
+                            }
+                        });
 
                     // return match message {
                     //     AriesMessage::OutOfBand(msg_type) => match msg_type {

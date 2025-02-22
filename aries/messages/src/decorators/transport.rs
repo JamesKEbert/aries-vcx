@@ -23,7 +23,7 @@ pub enum ReturnRoute {
     Thread,
 }
 
-/// Parses a String using Serde to retrieve a Transport Decorator if it is present, as this is not possible via AriesMessage. Will error if the string is not parsable by Serde (which should not occur if using a proper DIDComm message) or if the transport decorator is not correctly formatted.
+/// Parses a String using Serde to retrieve a Transport Decorator if it is present, as this is likely not possible until a significant refactor of the messaging crate occurs. Will error if the string is not parsable by Serde (which should not occur if using a proper DIDComm message) or if the transport decorator is not correctly formatted.
 pub fn get_transport_decorator_from_string(
     string: &str,
 ) -> Result<Option<Transport>, serde_json::Error> {
