@@ -270,7 +270,10 @@ pub mod messaging_service {
         },
         errors::error::AriesVcxError,
         messages::{
-            decorators::transport::{get_transport_decorator_from_string, ReturnRoute, Transport},
+            decorators::{
+                thread::Thread,
+                transport::{get_transport_decorator_from_string, ReturnRoute, Transport},
+            },
             msg_fields::protocols::{did_exchange::DidExchange, out_of_band::OutOfBand},
             msg_parts::MsgParts,
             AriesMessage,
@@ -313,6 +316,13 @@ pub mod messaging_service {
         // NoRegisteredTransportsForScheme(#[source] TransportError, TransportScheme),
         #[error("connection record not found for id `{0}`")]
         ConnectionRecordNotFound(Uuid),
+    }
+
+    /// A flag for a transport's return status -- whether to hold the connection open for all messages, for messages pertaining to a specific threadId, or to close the session (if appropriate).
+    pub enum ReturnStatus {
+        Complete,
+        All,
+        ThreadId(Thread),
     }
 
     pub struct MessagingService<W: BaseWallet> {
@@ -474,7 +484,7 @@ pub mod messaging_service {
         /// Handles an inbound encrypted DIDComm message. Will pass to the appropriate registered protocol handlers.
         ///
         /// If the inbound message contains a Transport Decorator with a return route 'All' or 'Thread' then the message can be returned back to the transport to send back immediately on the open connection. Otherwise, the protocol handler should use `send_message()`.
-        pub async fn receive_message(&self, encrypted_message: Jwe) -> Option<EncryptionEnvelope> {
+        pub async fn receive_message(&self, encrypted_message: Jwe) -> ReturnStatus {
             trace!("Received encrypted message: {:?}", encrypted_message);
             let decrypted_message_result = EncryptionEnvelope::unpack(
                 self.wallet.as_ref(),
@@ -484,13 +494,13 @@ pub mod messaging_service {
             .await;
             if decrypted_message_result.is_err() {
                 error!("Unable to decrypt received message");
-                return None;
+                return ReturnStatus::Complete;
             }
 
             let (message_string, sender_vk, recipient_vk) =
                 decrypted_message_result.expect("to be valid decrypted message values");
 
-            debug!(
+            info!(
                 "Received inbound message from sender key: {:?}
                   for recipient key: {:?}
                   message: {}",
@@ -513,15 +523,19 @@ pub mod messaging_service {
                     if transport_decorator_result.is_err() {
                         error!("Received a malphormed message or contains a malphormed transport decorator");
                         // TODO - return problem report
-                        return None;
+                        return ReturnStatus::Complete;
                     }
-                    let return_route_allowed = transport_decorator_result
+                    let return_status = transport_decorator_result
                         .expect("to be a valid transport decorator option")
-                        .map_or(false, |transport_decorator| {
-                            if transport_decorator.return_route != ReturnRoute::None {
-                                true
-                            } else {
-                                false
+                        .map_or(ReturnStatus::Complete, |transport_decorator| {
+                            match transport_decorator.return_route {
+                                ReturnRoute::All => ReturnStatus::Complete,
+                                ReturnRoute::Thread => transport_decorator
+                                    .return_route_thread
+                                    .map_or(ReturnStatus::Complete, |return_route_thread| {
+                                        ReturnStatus::ThreadId(return_route_thread)
+                                    }),
+                                ReturnRoute::None => ReturnStatus::Complete,
                             }
                         });
 
@@ -534,7 +548,7 @@ pub mod messaging_service {
                     //     },
                     //     _ => None,
                     // };
-                    None
+                    return_status
                 }
                 Err(_) => {
                     // May be helpful to indicate why -- for instance if it's due to an unsupported version, or a malphormed message, etc.
@@ -543,7 +557,7 @@ pub mod messaging_service {
                         "Unable to deserialize received message as a supported AriesMessage: {}",
                         message_string
                     );
-                    None
+                    ReturnStatus::Complete
                 }
             }
         }
