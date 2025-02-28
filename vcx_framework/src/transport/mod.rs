@@ -1,13 +1,15 @@
-use std::{collections::HashMap, error, str::FromStr};
+use std::{collections::HashMap, error, str::FromStr, sync::Arc};
 
 use aries_vcx::{
-    aries_vcx_wallet::wallet::askar::packing_types::Jwe,
+    aries_vcx_wallet::wallet::{askar::packing_types::Jwe, base_wallet::BaseWallet},
     utils::encryption_envelope::EncryptionEnvelope,
 };
 use async_trait::async_trait;
 use reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use thiserror::Error;
 use url::Url;
+
+use crate::messaging::MessageReceiver;
 
 #[derive(Error, Debug)]
 pub enum TransportError {
@@ -39,14 +41,16 @@ impl FromStr for TransportScheme {
 pub const PREFERRED_TRANSPORT_SCHEME_ORDER: [TransportScheme; 2] =
     [TransportScheme::WS, TransportScheme::HTTP];
 
-pub struct TransportRegistry {
+pub struct TransportRegistry<W: BaseWallet> {
     transports: HashMap<TransportScheme, Box<dyn Transport>>,
+    message_receiver: Arc<MessageReceiver<W>>,
 }
 
-impl TransportRegistry {
-    pub fn new() -> Self {
+impl<W: BaseWallet> TransportRegistry<W> {
+    pub fn new(message_receiver: Arc<MessageReceiver<W>>) -> Self {
         Self {
             transports: HashMap::new(),
+            message_receiver,
         }
     }
     pub fn register_transport(mut self, transport: impl Transport + 'static) -> Self {
@@ -62,14 +66,21 @@ impl TransportRegistry {
         &self,
         message: EncryptionEnvelope,
         endpoint: Url,
-    ) -> Result<Option<Jwe>, TransportError> {
+        returned_messages_allowed: bool,
+    ) -> Result<(), TransportError> {
         let scheme = TransportScheme::from_str(endpoint.scheme())?;
         let transport_option = self.transports.get(&scheme);
 
         match transport_option {
-            Some(transport) => Ok(transport.send_message(message, endpoint).await?),
-            None => Err(TransportError::NoRegisteredTransportForScheme(scheme)),
-        }
+            Some(transport) => {
+                let returned_message = transport.send_message(message, endpoint).await?;
+                if returned_messages_allowed {
+                    // self.messaging_service.receive_message();
+                }
+            }
+            None => return Err(TransportError::NoRegisteredTransportForScheme(scheme)),
+        };
+        Ok(())
     }
 }
 

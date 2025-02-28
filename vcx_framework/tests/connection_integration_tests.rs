@@ -14,7 +14,7 @@ use did_resolver_registry::ResolverRegistry;
 use url::Url;
 use vcx_framework::{
     connection_service::{self, ConnectionService},
-    messaging_service::MessagingService,
+    messaging::{MessageReceiver, MessageSender},
     repositories::{
         connection_repository::{
             ConnectionRecordData, ConnectionRecordTagKeys, ConnectionRepository,
@@ -74,10 +74,18 @@ async fn connect() {
             .expect("valid wallet to be created"),
     );
 
-    let transport_registry =
-        Arc::new(TransportRegistry::new().register_transport(HttpTransport::new()));
+    let message_receiver = Arc::new(MessageReceiver::new(
+        did_resolver_registry.clone(),
+        connection_repository.clone(),
+        did_repository.clone(),
+        wallet.clone(),
+    ));
 
-    let messaging_service = Arc::new(MessagingService::new(
+    let transport_registry = Arc::new(
+        TransportRegistry::new(message_receiver.clone()).register_transport(HttpTransport::new()),
+    );
+
+    let message_sender = Arc::new(MessageSender::new(
         did_resolver_registry.clone(),
         transport_registry,
         connection_repository.clone(),
@@ -90,7 +98,8 @@ async fn connect() {
         connection_repository,
         invitation_repository,
         did_repository,
-        messaging_service,
+        message_sender,
+        message_receiver,
         wallet,
         agent_endpoint,
         agent_label,

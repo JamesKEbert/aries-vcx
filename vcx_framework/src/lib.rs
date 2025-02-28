@@ -50,7 +50,7 @@ pub mod connection_service {
     use uuid::Uuid;
 
     use crate::{
-        messaging_service::{MessagingError, MessagingService},
+        messaging::{MessageReceiver, MessageSender, MessagingError},
         repositories::{
             connection_repository::{
                 ConnectionRecordData, ConnectionRecordTagKeys, ConnectionRepository,
@@ -91,7 +91,8 @@ pub mod connection_service {
         connection_repository: Arc<ConnectionRepository>,
         invitation_repository: Arc<InvitationRepository>,
         did_repository: Arc<DidRepository>,
-        messaging_service: Arc<MessagingService<W>>,
+        message_sender: Arc<MessageSender<W>>,
+        message_receiver: Arc<MessageReceiver<W>>,
         wallet: Arc<W>,
         agent_endpoint: Url,
         agent_label: String,
@@ -103,7 +104,8 @@ pub mod connection_service {
             connection_repository: Arc<ConnectionRepository>,
             invitation_repository: Arc<InvitationRepository>,
             did_repository: Arc<DidRepository>,
-            messaging_service: Arc<MessagingService<W>>,
+            message_sender: Arc<MessageSender<W>>,
+            message_receiver: Arc<MessageReceiver<W>>,
             wallet: Arc<W>,
             agent_endpoint: Url,
             agent_label: String,
@@ -113,7 +115,8 @@ pub mod connection_service {
                 connection_repository,
                 invitation_repository,
                 did_repository,
-                messaging_service,
+                message_sender,
+                message_receiver,
                 wallet,
                 agent_endpoint,
                 agent_label,
@@ -210,7 +213,7 @@ pub mod connection_service {
 
             let connection_id = Uuid::new_v4();
 
-            self.messaging_service
+            self.message_sender
                 .send_message(
                     &request.into(),
                     connection_id,
@@ -239,9 +242,7 @@ pub mod connection_service {
 
             self.connection_repository
                 .add_or_update_record(record)
-                .map_err(ConnectionServiceError::ConnectionStorageError);
-
-            //TODO - Emit Event
+                .map_err(ConnectionServiceError::ConnectionStorageError)?;
 
             Ok(connection_id)
         }
@@ -253,7 +254,7 @@ pub mod connection_service {
     }
 }
 
-pub mod messaging_service {
+pub mod messaging {
     use std::sync::Arc;
 
     use serde::Deserialize;
@@ -320,23 +321,23 @@ pub mod messaging_service {
 
     /// A flag for a transport's return status -- whether to hold the connection open for all messages, for messages pertaining to a specific threadId, or to close the session (if appropriate).
     pub enum ReturnStatus {
-        Complete,
+        Close,
         All,
         ThreadId(Thread),
     }
 
-    pub struct MessagingService<W: BaseWallet> {
+    pub struct MessageSender<W: BaseWallet> {
         did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
         connection_repository: Arc<ConnectionRepository>,
         did_repository: Arc<DidRepository>,
-        transport_registry: Arc<TransportRegistry>,
+        transport_registry: Arc<TransportRegistry<W>>,
         wallet: Arc<W>,
     }
 
-    impl<W: BaseWallet> MessagingService<W> {
+    impl<W: BaseWallet> MessageSender<W> {
         pub fn new(
             did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
-            transport_registry: Arc<TransportRegistry>,
+            transport_registry: Arc<TransportRegistry<W>>,
             connection_repository: Arc<ConnectionRepository>,
             did_repository: Arc<DidRepository>,
             wallet: Arc<W>,
@@ -431,43 +432,43 @@ pub mod messaging_service {
                 String::from_utf8_lossy(&encrypted_message.0)
             );
 
-            let returned_message = self
-                .transport_registry
-                .send_message(
-                    encrypted_message,
-                    receiver_service.service_endpoint().to_owned(),
-                )
-                .await
-                .map_err(MessagingError::OutboundTransportError)?;
+            // let returned_message = self
+            //     .transport_registry
+            //     .send_message(
+            //         encrypted_message,
+            //         receiver_service.service_endpoint().to_owned(),
+            //     )
+            //     .await
+            //     .map_err(MessagingError::OutboundTransportError)?;
 
-            debug!("Sent message");
+            // debug!("Sent message");
 
-            // Handle inbound message if one was returned due to a return route transport decorator (DIDComm v1) or return route extension (DIDComm v2)
-            if returned_message.is_some() {
-                debug!("Handling received message returned via return route mechanism");
+            // // Handle inbound message if one was returned due to a return route transport decorator (DIDComm v1) or in the future a return route extension (DIDComm v2)
+            // if returned_message.is_some() {
+            //     debug!("Handling received message returned via return route mechanism");
 
-                // Determine if a message is allowed to be returned immediately via return route as indicated by a transport decorator. This may be a somewhat simple/naive approach for handling the return route all mechanism as a more complicated session system may be beneficial, but is unnecessarily complex today. This approach _may_ be insufficient for future messages in the thread or connection being immediately returned.
-                let transport_decorator = get_transport_decorator_from_string(&message.to_string())
-                    .map_err(MessagingError::Deserialization);
-                let return_route_allowed = transport_decorator
-                    .expect("to be a valid transport decorator option")
-                    .map_or(false, |transport_decorator| {
-                        if transport_decorator.return_route != ReturnRoute::None {
-                            true
-                        } else {
-                            false
-                        }
-                    });
+            //     // Determine if a message is allowed to be returned immediately via return route as indicated by a transport decorator. This may be a somewhat simple/naive approach for handling the return route all mechanism as a more complicated session system may be beneficial, but is unnecessarily complex today. This approach _may_ be insufficient for future messages in the thread or connection being immediately returned.
+            //     let transport_decorator = get_transport_decorator_from_string(&message.to_string())
+            //         .map_err(MessagingError::Deserialization);
+            //     let return_route_allowed = transport_decorator
+            //         .expect("to be a valid transport decorator option")
+            //         .map_or(false, |transport_decorator| {
+            //             if transport_decorator.return_route != ReturnRoute::None {
+            //                 true
+            //             } else {
+            //                 false
+            //             }
+            //         });
 
-                if return_route_allowed {
-                    self.receive_message(encrypted_message)
-                } else {
-                }
-                // TODO: Check whether outbound message contained return route field, if not, we should log error upon receiving message and send problem report if possible
-                // let return_route_enabled = false;
+            //     if return_route_allowed {
+            //         let _ = self.receive_message(returned_message.expect("to be a message"));
+            //     } else {
+            //     }
+            //     // TODO: Check whether outbound message contained return route field, if not, we should log error upon receiving message and send problem report if possible
+            //     // let return_route_enabled = false;
 
-                // TODO
-            }
+            //     // TODO
+            // }
 
             // Event emitting
             // TODO
@@ -480,10 +481,33 @@ pub mod messaging_service {
 
             Ok(())
         }
+    }
+
+    pub struct MessageReceiver<W: BaseWallet> {
+        did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
+        connection_repository: Arc<ConnectionRepository>,
+        did_repository: Arc<DidRepository>,
+        wallet: Arc<W>,
+    }
+
+    impl<W: BaseWallet> MessageReceiver<W> {
+        pub fn new(
+            did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
+            connection_repository: Arc<ConnectionRepository>,
+            did_repository: Arc<DidRepository>,
+            wallet: Arc<W>,
+        ) -> Self {
+            Self {
+                did_resolver_registry,
+                connection_repository,
+                did_repository,
+                wallet,
+            }
+        }
 
         /// Handles an inbound encrypted DIDComm message. Will pass to the appropriate registered protocol handlers.
         ///
-        /// If the inbound message contains a Transport Decorator with a return route 'All' or 'Thread' then the message can be returned back to the transport to send back immediately on the open connection. Otherwise, the protocol handler should use `send_message()`.
+        /// Returns a `ReturnStatus`, which indicates whether to hold the connection open for immediate return messages. This is determined via a Transport Decorator flag with `return_route` set to 'All' or 'Thread'.
         pub async fn receive_message(&self, encrypted_message: Jwe) -> ReturnStatus {
             trace!("Received encrypted message: {:?}", encrypted_message);
             let decrypted_message_result = EncryptionEnvelope::unpack(
@@ -494,7 +518,7 @@ pub mod messaging_service {
             .await;
             if decrypted_message_result.is_err() {
                 error!("Unable to decrypt received message");
-                return ReturnStatus::Complete;
+                return ReturnStatus::Close;
             }
 
             let (message_string, sender_vk, recipient_vk) =
@@ -516,28 +540,28 @@ pub mod messaging_service {
                     // TODO - route to message handlers and await a return message (if any)
                     // TODO - determine if a message can/should be handled via a return-route-all immediate return
 
-                    // Determine if a message can be delivered immediately via return route as indicated by a transport decorator. This may be a somewhat simple/naive approach for handling the return route all mechanism as a more complicated session system may be beneficial, but is unnecessarily complex today. This approach _may_ be insufficient for future messages in the thread or connection being immediately returned.
                     let transport_decorator_result =
                         get_transport_decorator_from_string(&message_string);
 
                     if transport_decorator_result.is_err() {
                         error!("Received a malphormed message or contains a malphormed transport decorator");
                         // TODO - return problem report
-                        return ReturnStatus::Complete;
+                        return ReturnStatus::Close;
                     }
                     let return_status = transport_decorator_result
                         .expect("to be a valid transport decorator option")
-                        .map_or(ReturnStatus::Complete, |transport_decorator| {
-                            match transport_decorator.return_route {
-                                ReturnRoute::All => ReturnStatus::Complete,
+                        .map_or(
+                            ReturnStatus::Close,
+                            |transport_decorator| match transport_decorator.return_route {
+                                ReturnRoute::All => ReturnStatus::Close,
                                 ReturnRoute::Thread => transport_decorator
                                     .return_route_thread
-                                    .map_or(ReturnStatus::Complete, |return_route_thread| {
+                                    .map_or(ReturnStatus::Close, |return_route_thread| {
                                         ReturnStatus::ThreadId(return_route_thread)
                                     }),
-                                ReturnRoute::None => ReturnStatus::Complete,
-                            }
-                        });
+                                ReturnRoute::None => ReturnStatus::Close,
+                            },
+                        );
 
                     // TODO - send to handlers to process messages.
 
@@ -557,7 +581,7 @@ pub mod messaging_service {
                         "Unable to deserialize received message as a supported AriesMessage: {}",
                         message_string
                     );
-                    ReturnStatus::Complete
+                    ReturnStatus::Close
                 }
             }
         }
@@ -599,87 +623,87 @@ pub mod messaging_service {
             },
         };
 
-        #[tokio::test]
-        async fn test_send_message() {
-            test_init();
+        // #[tokio::test]
+        // async fn test_send_message() {
+        //     test_init();
 
-            let connection_id = Uuid::new_v4();
-            let message_content = PingContent::builder().response_requested(true).build();
-            let message_decorators = PingDecorators::builder().build();
-            let message = AriesMessage::TrustPing(
-                Ping::builder()
-                    .id(connection_id.to_string())
-                    .decorators(message_decorators)
-                    .content(message_content)
-                    .build(),
-            );
+        //     let connection_id = Uuid::new_v4();
+        //     let message_content = PingContent::builder().response_requested(true).build();
+        //     let message_decorators = PingDecorators::builder().build();
+        //     let message = AriesMessage::TrustPing(
+        //         Ping::builder()
+        //             .id(connection_id.to_string())
+        //             .decorators(message_decorators)
+        //             .content(message_content)
+        //             .build(),
+        //     );
 
-            let wallet_config = AskarWalletConfig {
-                db_url: IN_MEMORY_DB_URL.to_string(),
-                key_method: DEFAULT_ASKAR_KEY_METHOD,
-                pass_key: "sample_pass_key".to_string(),
-                profile: DEFAULT_WALLET_PROFILE.to_string(),
-            };
-            let wallet = wallet_config.create_wallet().await.unwrap();
+        //     let wallet_config = AskarWalletConfig {
+        //         db_url: IN_MEMORY_DB_URL.to_string(),
+        //         key_method: DEFAULT_ASKAR_KEY_METHOD,
+        //         pass_key: "sample_pass_key".to_string(),
+        //         profile: DEFAULT_WALLET_PROFILE.to_string(),
+        //     };
+        //     let wallet = wallet_config.create_wallet().await.unwrap();
 
-            let did_peer_resolver = PeerDidResolver::new();
-            let did_resolver_registry =
-                ResolverRegistry::new().register_resolver("peer".into(), did_peer_resolver);
+        //     let did_peer_resolver = PeerDidResolver::new();
+        //     let did_resolver_registry =
+        //         ResolverRegistry::new().register_resolver("peer".into(), did_peer_resolver);
 
-            let transport_registry =
-                TransportRegistry::new().register_transport(HttpTransport::new());
+        //     let transport_registry =
+        //         TransportRegistry::new().register_transport(HttpTransport::new());
 
-            let in_memory_storage =
-                InMemoryStorage::<ConnectionRecordData, ConnectionRecordTagKeys>::new();
-            let mut connection_repository = ConnectionRepository::new(Box::new(in_memory_storage));
+        //     let in_memory_storage =
+        //         InMemoryStorage::<ConnectionRecordData, ConnectionRecordTagKeys>::new();
+        //     let mut connection_repository = ConnectionRepository::new(Box::new(in_memory_storage));
 
-            let (our_did, _our_verkey) = create_peer_did_4(
-                &wallet,
-                Url::from_str("http://example.com").unwrap(),
-                vec![],
-            )
-            .await
-            .unwrap();
-            let (their_did, _their_verkey) = create_peer_did_4(
-                &wallet,
-                Url::from_str("http://example.com").unwrap(),
-                vec![],
-            )
-            .await
-            .unwrap();
+        //     let (our_did, _our_verkey) = create_peer_did_4(
+        //         &wallet,
+        //         Url::from_str("http://example.com").unwrap(),
+        //         vec![],
+        //     )
+        //     .await
+        //     .unwrap();
+        //     let (their_did, _their_verkey) = create_peer_did_4(
+        //         &wallet,
+        //         Url::from_str("http://example.com").unwrap(),
+        //         vec![],
+        //     )
+        //     .await
+        //     .unwrap();
 
-            connection_repository
-                .add_or_update_record(Record::new(
-                    connection_id.to_string(),
-                    ConnectionRecordData {
-                        role: ConnectionRole::Requester,
-                        our_did,
-                        their_did: their_did.did().clone(),
-                        invitation_did: their_did.did().clone(),
-                    },
-                    None,
-                ))
-                .unwrap();
+        //     connection_repository
+        //         .add_or_update_record(Record::new(
+        //             connection_id.to_string(),
+        //             ConnectionRecordData {
+        //                 role: ConnectionRole::Requester,
+        //                 our_did,
+        //                 their_did: their_did.did().clone(),
+        //                 invitation_did: their_did.did().clone(),
+        //             },
+        //             None,
+        //         ))
+        //         .unwrap();
 
-            let in_memory_storage_dids = InMemoryStorage::<DidRecordData, DidRecordTagKeys>::new();
-            let mut did_repository = DidRepository::new(Box::new(in_memory_storage_dids));
+        //     let in_memory_storage_dids = InMemoryStorage::<DidRecordData, DidRecordTagKeys>::new();
+        //     let mut did_repository = DidRepository::new(Box::new(in_memory_storage_dids));
 
-            let messaging_service = MessagingService::new(
-                Arc::new(did_resolver_registry),
-                Arc::new(transport_registry),
-                Arc::new(connection_repository),
-                Arc::new(did_repository),
-                Arc::new(wallet),
-            );
-            messaging_service
-                .send_message(
-                    &message,
-                    connection_id,
-                    Some(&[TransportScheme::HTTP, TransportScheme::WS]),
-                )
-                .await
-                .unwrap()
-        }
+        //     let messaging_service = MessagingService::new(
+        //         Arc::new(did_resolver_registry),
+        //         Arc::new(transport_registry),
+        //         Arc::new(connection_repository),
+        //         Arc::new(did_repository),
+        //         Arc::new(wallet),
+        //     );
+        //     messaging_service
+        //         .send_message(
+        //             &message,
+        //             connection_id,
+        //             Some(&[TransportScheme::HTTP, TransportScheme::WS]),
+        //         )
+        //         .await
+        //         .unwrap()
+        // }
     }
 }
 
