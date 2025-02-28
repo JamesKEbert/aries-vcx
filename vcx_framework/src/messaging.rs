@@ -1,0 +1,446 @@
+use std::sync::Arc;
+
+use serde::Deserialize;
+use serde_json::Value;
+use thiserror::Error;
+
+use aries_vcx::{
+    aries_vcx_wallet::wallet::{askar::packing_types::Jwe, base_wallet::BaseWallet},
+    did_doc::schema::{service::typed::ServiceType, utils::error::DidDocumentLookupError},
+    did_parser_nom::Did,
+    did_peer::{
+        error::DidPeerError,
+        peer_did::{numalgos::numalgo4::Numalgo4, PeerDid},
+    },
+    errors::error::AriesVcxError,
+    messages::{
+        decorators::{
+            thread::Thread,
+            transport::{get_transport_decorator_from_string, ReturnRoute, Transport},
+        },
+        msg_fields::protocols::{did_exchange::DidExchange, out_of_band::OutOfBand},
+        msg_parts::MsgParts,
+        AriesMessage,
+    },
+    utils::encryption_envelope::EncryptionEnvelope,
+};
+use did_resolver_registry::GenericError;
+use uuid::Uuid;
+
+use crate::{
+    repositories::{
+        connection_repository::{
+            ConnectionRecordData, ConnectionRecordTagKeys, ConnectionRepository,
+        },
+        did_repository::{DidRecordData, DidRecordTagKeys, DidRepository},
+    },
+    storage::{base::VCXFrameworkStorage, record::Record},
+    transport::{TransportError, TransportRegistry, TransportScheme},
+};
+
+#[derive(Error, Debug)]
+pub enum MessagingError {
+    #[error("error resolving DID `{1}`")]
+    DidResolution(#[source] GenericError, String),
+    #[error("error resolving peer DID `{1}`")]
+    DidResolutionPeerDid(#[source] DidPeerError, String),
+    #[error("unable to get service from DIDDoc for DID `{1}`")]
+    InvalidDidDocService(#[source] DidDocumentLookupError, String),
+    #[error("error encrypting message")]
+    EncryptMessage(#[source] AriesVcxError),
+    #[error("error decrypting message")]
+    DecryptMessage(#[source] AriesVcxError),
+    #[error("error deserializing message")]
+    Deserialization(#[source] serde_json::Error),
+    #[error("transport error while sending message")]
+    OutboundTransportError(#[source] TransportError),
+    // #[error("invalid transport scheme `{0}`")]
+    // InvalidTransportScheme(#[source] TransportError, String),
+    // #[error("no registered transports for diddoc service endpoint scheme `{}`", 1.to_string())]
+    // NoRegisteredTransportsForScheme(#[source] TransportError, TransportScheme),
+    #[error("connection record not found for id `{0}`")]
+    ConnectionRecordNotFound(Uuid),
+}
+
+/// A flag for a transport's return status -- whether to hold the connection open for all messages, for messages pertaining to a specific threadId, or to close the session (if appropriate).
+pub enum ReturnStatus {
+    Close,
+    All,
+    ThreadId(Thread),
+}
+
+pub struct MessageSender<W: BaseWallet> {
+    did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
+    connection_repository: Arc<ConnectionRepository>,
+    did_repository: Arc<DidRepository>,
+    transport_registry: Arc<TransportRegistry<W>>,
+    wallet: Arc<W>,
+}
+
+impl<W: BaseWallet> MessageSender<W> {
+    pub fn new(
+        did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
+        transport_registry: Arc<TransportRegistry<W>>,
+        connection_repository: Arc<ConnectionRepository>,
+        did_repository: Arc<DidRepository>,
+        wallet: Arc<W>,
+    ) -> Self {
+        Self {
+            did_resolver_registry,
+            transport_registry,
+            connection_repository,
+            did_repository,
+            wallet,
+        }
+    }
+    pub async fn send_message(
+        &self,
+        message: &AriesMessage,
+        connection_id: Uuid,
+        _preferred_transports: Option<&[TransportScheme]>,
+    ) -> Result<(), MessagingError> {
+        info!(
+            "Sending Aries Message to connection `{}`:
+        {:?}",
+            connection_id, message
+        );
+
+        let connection_record: Record<ConnectionRecordData, ConnectionRecordTagKeys> = self
+            .connection_repository
+            .get_record(&connection_id)
+            .map_err(|_| MessagingError::ConnectionRecordNotFound(connection_id))?
+            .ok_or(MessagingError::ConnectionRecordNotFound(connection_id))?;
+
+        self.send_message_to_did(
+            message,
+            connection_record.data.our_did,
+            connection_record.data.their_did,
+            _preferred_transports,
+        )
+        .await?;
+
+        info!("Sent Aries Message to connection `{}`", connection_id);
+        Ok(())
+    }
+
+    // Should this be restricted to sender_did being a peer did? (probably not)
+    /// Send a message to a DID
+    ///
+    async fn send_message_to_did(
+        &self,
+        message: &AriesMessage,
+        sender_did: PeerDid<Numalgo4>,
+        receiver_did: Did,
+        _preferred_transports: Option<&[TransportScheme]>,
+    ) -> Result<(), MessagingError> {
+        debug!(
+            "Sending Aries Message {}
+              to Receiver DID {}
+              from Sender DID {}",
+            &message, &receiver_did, &sender_did
+        );
+
+        let receiver_did_document = self
+            .did_resolver_registry
+            .resolve(&receiver_did, &Default::default())
+            .await
+            .map_err(|err| MessagingError::DidResolution(err, receiver_did.to_string()))?
+            .did_document;
+        let sender_did_document = sender_did
+            .resolve_did_doc()
+            .map_err(|err| MessagingError::DidResolutionPeerDid(err, sender_did.to_string()))?;
+
+        // TODO: need to provide a way of iterating through all available services, in order of transport preference, instead of just taking the first available service. This would also allow us additional services if one fails.
+        // Allow override of default preferred transport scheme order (as protocols may dictate or prefer specific protocols)
+        // let protocols_to_try = preferred_transports.unwrap_or(PREFERRED_PROTOCOL_ORDER.to_vec());
+
+        let receiver_service = receiver_did_document
+            .get_service_of_type(&ServiceType::DIDCommV1)
+            .map_err(|err| MessagingError::InvalidDidDocService(err, receiver_did.to_string()))?;
+
+        let encrypted_message = EncryptionEnvelope::create(
+            self.wallet.as_ref(),
+            message.to_string().as_bytes(),
+            &sender_did_document,
+            &receiver_did_document,
+            receiver_service.id(),
+        )
+        .await
+        .map_err(MessagingError::EncryptMessage)?;
+
+        trace!(
+            "EncryptedMessage to send: {}",
+            String::from_utf8_lossy(&encrypted_message.0)
+        );
+
+        // let returned_message = self
+        //     .transport_registry
+        //     .send_message(
+        //         encrypted_message,
+        //         receiver_service.service_endpoint().to_owned(),
+        //     )
+        //     .await
+        //     .map_err(MessagingError::OutboundTransportError)?;
+
+        // debug!("Sent message");
+
+        // // Handle inbound message if one was returned due to a return route transport decorator (DIDComm v1) or in the future a return route extension (DIDComm v2)
+        // if returned_message.is_some() {
+        //     debug!("Handling received message returned via return route mechanism");
+
+        //     // Determine if a message is allowed to be returned immediately via return route as indicated by a transport decorator. This may be a somewhat simple/naive approach for handling the return route all mechanism as a more complicated session system may be beneficial, but is unnecessarily complex today. This approach _may_ be insufficient for future messages in the thread or connection being immediately returned.
+        //     let transport_decorator = get_transport_decorator_from_string(&message.to_string())
+        //         .map_err(MessagingError::Deserialization);
+        //     let return_route_allowed = transport_decorator
+        //         .expect("to be a valid transport decorator option")
+        //         .map_or(false, |transport_decorator| {
+        //             if transport_decorator.return_route != ReturnRoute::None {
+        //                 true
+        //             } else {
+        //                 false
+        //             }
+        //         });
+
+        //     if return_route_allowed {
+        //         let _ = self.receive_message(returned_message.expect("to be a message"));
+        //     } else {
+        //     }
+        //     // TODO: Check whether outbound message contained return route field, if not, we should log error upon receiving message and send problem report if possible
+        //     // let return_route_enabled = false;
+
+        //     // TODO
+        // }
+
+        // Event emitting
+        // TODO
+        // self.emit_event(MessagingEvents::OutboundMessage(OutboundMessage {
+        //     message: message.clone(),
+        //     encrypted_message: encrypted_message.clone(),
+        //     sender_did: sender_did.clone(),
+        //     receiver_did: receiver_did.clone(),
+        // }));
+
+        Ok(())
+    }
+}
+
+pub struct MessageReceiver<W: BaseWallet> {
+    did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
+    connection_repository: Arc<ConnectionRepository>,
+    did_repository: Arc<DidRepository>,
+    wallet: Arc<W>,
+}
+
+impl<W: BaseWallet> MessageReceiver<W> {
+    pub fn new(
+        did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
+        connection_repository: Arc<ConnectionRepository>,
+        did_repository: Arc<DidRepository>,
+        wallet: Arc<W>,
+    ) -> Self {
+        Self {
+            did_resolver_registry,
+            connection_repository,
+            did_repository,
+            wallet,
+        }
+    }
+
+    /// Handles an inbound encrypted DIDComm message. Will pass to the appropriate registered protocol handlers.
+    ///
+    /// Returns a `ReturnStatus`, which indicates whether to hold the connection open for immediate return messages. This is determined via a Transport Decorator flag with `return_route` set to 'All' or 'Thread'.
+    pub async fn receive_message(&self, encrypted_message: Jwe) -> ReturnStatus {
+        trace!("Received encrypted message: {:?}", encrypted_message);
+        let decrypted_message_result = EncryptionEnvelope::unpack(
+            self.wallet.as_ref(),
+            serde_json::json!(encrypted_message).to_string().as_bytes(),
+            &None,
+        )
+        .await;
+        if decrypted_message_result.is_err() {
+            error!("Unable to decrypt received message");
+            return ReturnStatus::Close;
+        }
+
+        let (message_string, sender_vk, recipient_vk) =
+            decrypted_message_result.expect("to be valid decrypted message values");
+
+        info!(
+            "Received inbound message from sender key: {:?}
+              for recipient key: {:?}
+              message: {}",
+            sender_vk, recipient_vk, message_string
+        );
+
+        let message_result: Result<AriesMessage, serde_json::Error> =
+            serde_json::from_str(&message_string);
+
+        match message_result {
+            Ok(message) => {
+                trace!("Deserialized message: {}", message);
+                // TODO - route to message handlers and await a return message (if any)
+                // TODO - determine if a message can/should be handled via a return-route-all immediate return
+
+                let transport_decorator_result =
+                    get_transport_decorator_from_string(&message_string);
+
+                if transport_decorator_result.is_err() {
+                    error!("Received a malphormed message or contains a malphormed transport decorator");
+                    // TODO - return problem report
+                    return ReturnStatus::Close;
+                }
+                let return_status = transport_decorator_result
+                    .expect("to be a valid transport decorator option")
+                    .map_or(
+                        ReturnStatus::Close,
+                        |transport_decorator| match transport_decorator.return_route {
+                            ReturnRoute::All => ReturnStatus::Close,
+                            ReturnRoute::Thread => transport_decorator
+                                .return_route_thread
+                                .map_or(ReturnStatus::Close, |return_route_thread| {
+                                    ReturnStatus::ThreadId(return_route_thread)
+                                }),
+                            ReturnRoute::None => ReturnStatus::Close,
+                        },
+                    );
+
+                // TODO - send to handlers to process messages.
+
+                // return match message {
+                //     AriesMessage::OutOfBand(msg_type) => match msg_type {
+                //         OutOfBand::HandshakeReuse(msg_type_specific) => {}
+                //         _ => None,
+                //     },
+                //     _ => None,
+                // };
+                return_status
+            }
+            Err(_) => {
+                // May be helpful to indicate why -- for instance if it's due to an unsupported version, or a malphormed message, etc.
+                // TODO - add problem report response message if/as appropriate
+                error!(
+                    "Unable to deserialize received message as a supported AriesMessage: {}",
+                    message_string
+                );
+                ReturnStatus::Close
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use aries_vcx::{
+        aries_vcx_wallet::wallet::{
+            askar::{
+                askar_wallet_config::AskarWalletConfig,
+                key_method::{ArgonLevel, AskarKdfMethod, KeyMethod},
+            },
+            base_wallet::ManageWallet,
+        },
+        did_peer::resolver::PeerDidResolver,
+        messages::msg_fields::protocols::trust_ping::ping::{Ping, PingContent, PingDecorators},
+        protocols::did_exchange::state_machine::helpers::create_peer_did_4,
+    };
+    use did_resolver_registry::ResolverRegistry;
+    use url::Url;
+
+    use crate::{
+        repositories::connection_repository::ConnectionRole,
+        storage::in_memory_storage::InMemoryStorage, test_init, transport::HttpTransport,
+    };
+
+    use super::*;
+
+    pub const IN_MEMORY_DB_URL: &str = "sqlite://:memory:";
+    pub const DEFAULT_WALLET_PROFILE: &str = "aries_framework_vcx_default";
+    pub const DEFAULT_ASKAR_KEY_METHOD: KeyMethod = KeyMethod::DeriveKey {
+        inner: AskarKdfMethod::Argon2i {
+            inner: (ArgonLevel::Interactive),
+        },
+    };
+
+    // #[tokio::test]
+    // async fn test_send_message() {
+    //     test_init();
+
+    //     let connection_id = Uuid::new_v4();
+    //     let message_content = PingContent::builder().response_requested(true).build();
+    //     let message_decorators = PingDecorators::builder().build();
+    //     let message = AriesMessage::TrustPing(
+    //         Ping::builder()
+    //             .id(connection_id.to_string())
+    //             .decorators(message_decorators)
+    //             .content(message_content)
+    //             .build(),
+    //     );
+
+    //     let wallet_config = AskarWalletConfig {
+    //         db_url: IN_MEMORY_DB_URL.to_string(),
+    //         key_method: DEFAULT_ASKAR_KEY_METHOD,
+    //         pass_key: "sample_pass_key".to_string(),
+    //         profile: DEFAULT_WALLET_PROFILE.to_string(),
+    //     };
+    //     let wallet = wallet_config.create_wallet().await.unwrap();
+
+    //     let did_peer_resolver = PeerDidResolver::new();
+    //     let did_resolver_registry =
+    //         ResolverRegistry::new().register_resolver("peer".into(), did_peer_resolver);
+
+    //     let transport_registry =
+    //         TransportRegistry::new().register_transport(HttpTransport::new());
+
+    //     let in_memory_storage =
+    //         InMemoryStorage::<ConnectionRecordData, ConnectionRecordTagKeys>::new();
+    //     let mut connection_repository = ConnectionRepository::new(Box::new(in_memory_storage));
+
+    //     let (our_did, _our_verkey) = create_peer_did_4(
+    //         &wallet,
+    //         Url::from_str("http://example.com").unwrap(),
+    //         vec![],
+    //     )
+    //     .await
+    //     .unwrap();
+    //     let (their_did, _their_verkey) = create_peer_did_4(
+    //         &wallet,
+    //         Url::from_str("http://example.com").unwrap(),
+    //         vec![],
+    //     )
+    //     .await
+    //     .unwrap();
+
+    //     connection_repository
+    //         .add_or_update_record(Record::new(
+    //             connection_id.to_string(),
+    //             ConnectionRecordData {
+    //                 role: ConnectionRole::Requester,
+    //                 our_did,
+    //                 their_did: their_did.did().clone(),
+    //                 invitation_did: their_did.did().clone(),
+    //             },
+    //             None,
+    //         ))
+    //         .unwrap();
+
+    //     let in_memory_storage_dids = InMemoryStorage::<DidRecordData, DidRecordTagKeys>::new();
+    //     let mut did_repository = DidRepository::new(Box::new(in_memory_storage_dids));
+
+    //     let messaging_service = MessagingService::new(
+    //         Arc::new(did_resolver_registry),
+    //         Arc::new(transport_registry),
+    //         Arc::new(connection_repository),
+    //         Arc::new(did_repository),
+    //         Arc::new(wallet),
+    //     );
+    //     messaging_service
+    //         .send_message(
+    //             &message,
+    //             connection_id,
+    //             Some(&[TransportScheme::HTTP, TransportScheme::WS]),
+    //         )
+    //         .await
+    //         .unwrap()
+    // }
+}
