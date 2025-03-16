@@ -1,15 +1,19 @@
-use std::{collections::HashMap, error, str::FromStr, sync::Arc};
+use std::{
+    collections::HashMap,
+    error,
+    str::FromStr,
+    sync::{Arc, Weak},
+};
 
 use aries_vcx::{
     aries_vcx_wallet::wallet::{askar::packing_types::Jwe, base_wallet::BaseWallet},
+    messages::decorators::thread::Thread,
     utils::encryption_envelope::EncryptionEnvelope,
 };
 use async_trait::async_trait;
 use reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use thiserror::Error;
 use url::Url;
-
-use crate::messaging::MessageReceiver;
 
 #[derive(Error, Debug)]
 pub enum TransportError {
@@ -41,22 +45,34 @@ impl FromStr for TransportScheme {
 pub const PREFERRED_TRANSPORT_SCHEME_ORDER: [TransportScheme; 2] =
     [TransportScheme::WS, TransportScheme::HTTP];
 
-pub struct TransportRegistry<W: BaseWallet> {
-    transports: HashMap<TransportScheme, Box<dyn Transport>>,
-    message_receiver: Arc<MessageReceiver<W>>,
+/// A flag for a transport's return status -- whether to hold the connection open for all messages, for messages pertaining to a specific threadId, or to close the session (if appropriate).
+pub enum ReturnStatus {
+    Close,
+    All,
+    ThreadId(Thread),
 }
 
-impl<W: BaseWallet> TransportRegistry<W> {
-    pub fn new(message_receiver: Arc<MessageReceiver<W>>) -> Self {
+#[async_trait(?Send)]
+pub trait InboundMessageReceiver {
+    async fn receive_message(&self, encrypted_message: Jwe) -> ReturnStatus;
+}
+
+pub struct TransportManager {
+    transports: HashMap<TransportScheme, Box<dyn Transport>>,
+
+    message_receiver: Arc<dyn InboundMessageReceiver>,
+}
+
+impl TransportManager {
+    pub fn new(message_receiver: Arc<dyn InboundMessageReceiver>) -> Self {
         Self {
             transports: HashMap::new(),
             message_receiver,
         }
     }
-    pub fn register_transport(mut self, transport: impl Transport + 'static) -> Self {
-        self.transports
-            .insert(transport.get_scheme(), Box::new(transport));
-        self
+
+    pub fn register_transport(&mut self, transport: Box<dyn Transport>) -> () {
+        self.transports.insert(transport.get_scheme(), transport);
     }
 
     pub fn get_supported_schemes(&self) -> Vec<&TransportScheme> {
@@ -73,40 +89,42 @@ impl<W: BaseWallet> TransportRegistry<W> {
 
         match transport_option {
             Some(transport) => {
-                let returned_message = transport.send_message(message, endpoint).await?;
-                if returned_messages_allowed {
-                    // self.messaging_service.receive_message();
-                }
+                transport
+                    .send_message(message, endpoint, returned_messages_allowed)
+                    .await?;
+                Ok(())
             }
-            None => return Err(TransportError::NoRegisteredTransportForScheme(scheme)),
-        };
-        Ok(())
+            None => Err(TransportError::NoRegisteredTransportForScheme(scheme)),
+        }
     }
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 pub trait Transport {
     fn get_scheme(&self) -> TransportScheme;
     async fn send_message(
         &self,
         message: EncryptionEnvelope,
         endpoint: Url,
-    ) -> Result<Option<Jwe>, TransportError>;
+        returned_messages_allowed: bool,
+    ) -> Result<(), TransportError>;
 }
 
 pub trait InboundTransport {
     // fn new that takes inbound_message() method
 }
 
-pub struct HttpTransport {}
+pub struct HttpTransport {
+    transport_registry: Weak<TransportManager>,
+}
 
 impl HttpTransport {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(transport_registry: Weak<TransportManager>) -> Self {
+        Self { transport_registry }
     }
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl Transport for HttpTransport {
     fn get_scheme(&self) -> TransportScheme {
         TransportScheme::HTTP
@@ -116,7 +134,8 @@ impl Transport for HttpTransport {
         &self,
         message: EncryptionEnvelope,
         endpoint: Url,
-    ) -> Result<Option<Jwe>, TransportError> {
+        returned_messages_allowed: bool,
+    ) -> Result<(), TransportError> {
         debug!(
             "Sending DIDComm message via HTTP Transport to endpoint `{}`",
             endpoint
@@ -135,6 +154,157 @@ impl Transport for HttpTransport {
         debug!("Received Response with Status `{}`", res.status());
 
         debug!("Sent message via HTTP Transport to endpoint `{}`", endpoint);
-        Ok(res.json::<Jwe>().await.ok())
+        Ok(())
+        // Ok(res.json::<Jwe>().await.ok())
     }
 }
+
+// use std::{
+//     collections::HashMap,
+//     error,
+//     str::FromStr,
+//     sync::{Arc, Weak},
+// };
+
+// use aries_vcx::{
+//     aries_vcx_wallet::wallet::{askar::packing_types::Jwe, base_wallet::BaseWallet},
+//     utils::encryption_envelope::EncryptionEnvelope,
+// };
+// use async_trait::async_trait;
+// use reqwest::header::{CONTENT_TYPE, USER_AGENT};
+// use thiserror::Error;
+// use url::Url;
+
+// use crate::messaging::{MessageProcessor, MessageReceiver};
+
+// #[derive(Error, Debug)]
+// pub enum TransportError {
+//     #[error("invalid transport scheme `{0}`")]
+//     InvalidTransportScheme(String),
+//     #[error("no transport registered for scheme `{}`", 0.to_string())]
+//     NoRegisteredTransportForScheme(TransportScheme),
+//     #[error("error sending message")]
+//     ErrorSendingMessage(Box<dyn error::Error>),
+// }
+
+// #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+// pub enum TransportScheme {
+//     HTTP,
+//     WS,
+// }
+
+// impl FromStr for TransportScheme {
+//     type Err = TransportError;
+//     fn from_str(s: &str) -> Result<Self, Self::Err> {
+//         match s.to_lowercase().as_str() {
+//             "http" | "https" => Ok(TransportScheme::HTTP),
+//             "ws" | "wss" => Ok(TransportScheme::WS),
+//             _ => Err(TransportError::InvalidTransportScheme(String::from(s))),
+//         }
+//     }
+// }
+
+// pub const PREFERRED_TRANSPORT_SCHEME_ORDER: [TransportScheme; 2] =
+//     [TransportScheme::WS, TransportScheme::HTTP];
+
+// pub struct TransportRegistry {
+//     transports: HashMap<TransportScheme, Box<dyn Transport>>,
+
+//     message_receiver: Arc<dyn MessageProcessor>,
+// }
+
+// impl TransportRegistry {
+//     pub fn new(message_receiver: Arc<dyn MessageProcessor>) -> Self {
+//         Self {
+//             transports: HashMap::new(),
+//             message_receiver,
+//         }
+//     }
+
+//     pub fn register_transport(&mut self, transport: Box<dyn Transport>) -> () {
+//         self.transports.insert(transport.get_scheme(), transport);
+//     }
+
+//     pub fn get_supported_schemes(&self) -> Vec<&TransportScheme> {
+//         self.transports.keys().collect()
+//     }
+//     pub async fn send_message(
+//         &self,
+//         message: EncryptionEnvelope,
+//         endpoint: Url,
+//         returned_messages_allowed: bool,
+//     ) -> Result<(), TransportError> {
+//         let scheme = TransportScheme::from_str(endpoint.scheme())?;
+//         let transport_option = self.transports.get(&scheme);
+
+//         match transport_option {
+//             Some(transport) => {
+//                 transport
+//                     .send_message(message, endpoint, returned_messages_allowed)
+//                     .await?;
+//                 Ok(())
+//             }
+//             None => Err(TransportError::NoRegisteredTransportForScheme(scheme)),
+//         }
+//     }
+// }
+
+// #[async_trait(?Send)]
+// pub trait Transport {
+//     fn get_scheme(&self) -> TransportScheme;
+//     async fn send_message(
+//         &self,
+//         message: EncryptionEnvelope,
+//         endpoint: Url,
+//         returned_messages_allowed: bool,
+//     ) -> Result<(), TransportError>;
+// }
+
+// pub trait InboundTransport {
+//     // fn new that takes inbound_message() method
+// }
+
+// pub struct HttpTransport {
+//     transport_registry: Weak<TransportRegistry>,
+// }
+
+// impl HttpTransport {
+//     pub fn new(transport_registry: Weak<TransportRegistry>) -> Self {
+//         Self { transport_registry }
+//     }
+// }
+
+// #[async_trait(?Send)]
+// impl Transport for HttpTransport {
+//     fn get_scheme(&self) -> TransportScheme {
+//         TransportScheme::HTTP
+//     }
+
+//     async fn send_message(
+//         &self,
+//         message: EncryptionEnvelope,
+//         endpoint: Url,
+//         returned_messages_allowed: bool,
+//     ) -> Result<(), TransportError> {
+//         debug!(
+//             "Sending DIDComm message via HTTP Transport to endpoint `{}`",
+//             endpoint
+//         );
+
+//         let client = reqwest::Client::new();
+//         let res = client
+//             .post(endpoint.clone())
+//             .body(message.0)
+//             .header(CONTENT_TYPE, "application/didcomm-envelope-enc")
+//             .header(USER_AGENT, "reqwest")
+//             .send()
+//             .await
+//             .map_err(|err| TransportError::ErrorSendingMessage(Box::new(err)))?;
+
+//         debug!("Received Response with Status `{}`", res.status());
+
+//         debug!("Sent message via HTTP Transport to endpoint `{}`", endpoint);
+//         Ok(())
+//         // Ok(res.json::<Jwe>().await.ok())
+//     }
+// }

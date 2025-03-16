@@ -25,7 +25,7 @@ use vcx_framework::{
         },
     },
     storage::in_memory_storage::InMemoryStorage,
-    transport::{HttpTransport, TransportRegistry},
+    transport::{HttpTransport, TransportManager},
 };
 
 mod common;
@@ -81,13 +81,16 @@ async fn connect() {
         wallet.clone(),
     ));
 
-    let transport_registry = Arc::new(
-        TransportRegistry::new(message_receiver.clone()).register_transport(HttpTransport::new()),
-    );
+    // TODO - transport definition (having this done here won't allow for injection at runtime, which is kinda cool, but thats okay. - maybe a true statement)
+    // perhaps we make the transports have a register_receiver() method that sets the receiver. If they receive a message if it's not set, they error. Seems a little hacky
+
+    let mut transport_manager = TransportManager::new(message_receiver.clone());
+    //TODO - have the transport receive reference to message_receiver or transport registry (either by factory or by instantiating with the reference, probably the latter)
+    // transport_registry.register_transport(HttpTransport::new());
 
     let message_sender = Arc::new(MessageSender::new(
         did_resolver_registry.clone(),
-        transport_registry,
+        transport_manager,
         connection_repository.clone(),
         did_repository.clone(),
         wallet.clone(),

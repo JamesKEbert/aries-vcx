@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
@@ -35,7 +36,9 @@ use crate::{
         did_repository::{DidRecordData, DidRecordTagKeys, DidRepository},
     },
     storage::{base::VCXFrameworkStorage, record::Record},
-    transport::{TransportError, TransportRegistry, TransportScheme},
+    transport::{
+        InboundMessageReceiver, ReturnStatus, TransportError, TransportManager, TransportScheme,
+    },
 };
 
 #[derive(Error, Debug)]
@@ -62,32 +65,25 @@ pub enum MessagingError {
     ConnectionRecordNotFound(Uuid),
 }
 
-/// A flag for a transport's return status -- whether to hold the connection open for all messages, for messages pertaining to a specific threadId, or to close the session (if appropriate).
-pub enum ReturnStatus {
-    Close,
-    All,
-    ThreadId(Thread),
-}
-
 pub struct MessageSender<W: BaseWallet> {
     did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
     connection_repository: Arc<ConnectionRepository>,
     did_repository: Arc<DidRepository>,
-    transport_registry: Arc<TransportRegistry<W>>,
+    transport_manager: TransportManager,
     wallet: Arc<W>,
 }
 
 impl<W: BaseWallet> MessageSender<W> {
     pub fn new(
         did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
-        transport_registry: Arc<TransportRegistry<W>>,
+        transport_manager: TransportManager,
         connection_repository: Arc<ConnectionRepository>,
         did_repository: Arc<DidRepository>,
         wallet: Arc<W>,
     ) -> Self {
         Self {
             did_resolver_registry,
-            transport_registry,
+            transport_manager,
             connection_repository,
             did_repository,
             wallet,
@@ -134,7 +130,7 @@ impl<W: BaseWallet> MessageSender<W> {
         _preferred_transports: Option<&[TransportScheme]>,
     ) -> Result<(), MessagingError> {
         debug!(
-            "Sending Aries Message {}
+            "Sending DIDComm Message {}
               to Receiver DID {}
               from Sender DID {}",
             &message, &receiver_did, &sender_did
@@ -173,43 +169,29 @@ impl<W: BaseWallet> MessageSender<W> {
             String::from_utf8_lossy(&encrypted_message.0)
         );
 
-        // let returned_message = self
-        //     .transport_registry
-        //     .send_message(
-        //         encrypted_message,
-        //         receiver_service.service_endpoint().to_owned(),
-        //     )
-        //     .await
-        //     .map_err(MessagingError::OutboundTransportError)?;
+        // Determine if a message is allowed to be returned immediately via return route as indicated by a transport decorator. This approach may warrant additional changes in the future to better handle 'All' vs 'Thread'.
+        let transport_decorator = get_transport_decorator_from_string(&message.to_string())
+            .map_err(MessagingError::Deserialization);
+        let return_route_allowed = transport_decorator
+            .expect("to be a valid transport decorator option")
+            .map_or(false, |transport_decorator| {
+                if transport_decorator.return_route != ReturnRoute::None {
+                    true
+                } else {
+                    false
+                }
+            });
 
-        // debug!("Sent message");
+        self.transport_manager
+            .send_message(
+                encrypted_message,
+                receiver_service.service_endpoint().to_owned(),
+                return_route_allowed,
+            )
+            .await
+            .map_err(MessagingError::OutboundTransportError)?;
 
-        // // Handle inbound message if one was returned due to a return route transport decorator (DIDComm v1) or in the future a return route extension (DIDComm v2)
-        // if returned_message.is_some() {
-        //     debug!("Handling received message returned via return route mechanism");
-
-        //     // Determine if a message is allowed to be returned immediately via return route as indicated by a transport decorator. This may be a somewhat simple/naive approach for handling the return route all mechanism as a more complicated session system may be beneficial, but is unnecessarily complex today. This approach _may_ be insufficient for future messages in the thread or connection being immediately returned.
-        //     let transport_decorator = get_transport_decorator_from_string(&message.to_string())
-        //         .map_err(MessagingError::Deserialization);
-        //     let return_route_allowed = transport_decorator
-        //         .expect("to be a valid transport decorator option")
-        //         .map_or(false, |transport_decorator| {
-        //             if transport_decorator.return_route != ReturnRoute::None {
-        //                 true
-        //             } else {
-        //                 false
-        //             }
-        //         });
-
-        //     if return_route_allowed {
-        //         let _ = self.receive_message(returned_message.expect("to be a message"));
-        //     } else {
-        //     }
-        //     // TODO: Check whether outbound message contained return route field, if not, we should log error upon receiving message and send problem report if possible
-        //     // let return_route_enabled = false;
-
-        //     // TODO
-        // }
+        debug!("Sent message");
 
         // Event emitting
         // TODO
@@ -245,11 +227,14 @@ impl<W: BaseWallet> MessageReceiver<W> {
             wallet,
         }
     }
+}
 
+#[async_trait(?Send)]
+impl<W: BaseWallet> InboundMessageReceiver for MessageReceiver<W> {
     /// Handles an inbound encrypted DIDComm message. Will pass to the appropriate registered protocol handlers.
     ///
     /// Returns a `ReturnStatus`, which indicates whether to hold the connection open for immediate return messages. This is determined via a Transport Decorator flag with `return_route` set to 'All' or 'Thread'.
-    pub async fn receive_message(&self, encrypted_message: Jwe) -> ReturnStatus {
+    async fn receive_message(&self, encrypted_message: Jwe) -> ReturnStatus {
         trace!("Received encrypted message: {:?}", encrypted_message);
         let decrypted_message_result = EncryptionEnvelope::unpack(
             self.wallet.as_ref(),
