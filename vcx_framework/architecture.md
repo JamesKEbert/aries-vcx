@@ -126,3 +126,15 @@ Instead, prefer mapping the error, which is illustrated well here with two error
     let value = function_that_returns_ariesvcxerror().map_err(MessagingError::EncryptMessage)?;
   }
 ```
+
+
+### Transport Decorator Return Route Handling
+
+In order to handle Transport Decorator return route all/thread for immediate message return/receive, the architecture plan is as follows:
+
+Client-side - The transport registry on send_message() will have an argument as to whether to expect/allow messages to be returned in response to our send (HTTP the response to the GET request for instance; a received message on a WS socket).
+  if yes, the transport registry should send message for processing to receive_message().
+
+Server-side - The transport registry on receive_message() will expect an enum indicating whether to close session as message received successfully (for HTTP for instance) or whether to keep the "session" open for a possible return route message. 
+
+Might need to split the receive_message() into two functions -- one that returns an enum and one that doesn't. Or just have it return an enum even if it is just ignored in the client-side case.

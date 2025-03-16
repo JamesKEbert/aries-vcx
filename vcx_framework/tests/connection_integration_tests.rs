@@ -14,7 +14,7 @@ use did_resolver_registry::ResolverRegistry;
 use url::Url;
 use vcx_framework::{
     connection_service::{self, ConnectionService},
-    messaging_service::MessagingService,
+    messaging::{MessageReceiver, MessageSender},
     repositories::{
         connection_repository::{
             ConnectionRecordData, ConnectionRecordTagKeys, ConnectionRepository,
@@ -25,7 +25,7 @@ use vcx_framework::{
         },
     },
     storage::in_memory_storage::InMemoryStorage,
-    transport::{HttpTransport, TransportRegistry},
+    transport::{HttpTransport, TransportManager},
 };
 
 mod common;
@@ -74,12 +74,22 @@ async fn connect() {
             .expect("valid wallet to be created"),
     );
 
-    let transport_registry =
-        Arc::new(TransportRegistry::new().register_transport(HttpTransport::new()));
-
-    let messaging_service = Arc::new(MessagingService::new(
+    let message_receiver = Arc::new(MessageReceiver::new(
         did_resolver_registry.clone(),
-        transport_registry,
+        connection_repository.clone(),
+        did_repository.clone(),
+        wallet.clone(),
+    ));
+
+    let transport_manager = Arc::new_cyclic(|weak_transport_manager| {
+        let mut manager = TransportManager::new(message_receiver.clone());
+        manager.register_transport(Box::new(HttpTransport::new(weak_transport_manager.clone())));
+        manager
+    });
+
+    let message_sender = Arc::new(MessageSender::new(
+        did_resolver_registry.clone(),
+        transport_manager,
         connection_repository.clone(),
         did_repository.clone(),
         wallet.clone(),
@@ -90,7 +100,8 @@ async fn connect() {
         connection_repository,
         invitation_repository,
         did_repository,
-        messaging_service,
+        message_sender,
+        message_receiver,
         wallet,
         agent_endpoint,
         agent_label,

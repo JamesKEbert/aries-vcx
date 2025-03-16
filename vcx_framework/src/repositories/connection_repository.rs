@@ -31,7 +31,14 @@ pub enum ConnectionRecordTagKeys {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ConnectionRole {
+    Requester,
+    Responder,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConnectionRecordData {
+    pub role: ConnectionRole,
     pub our_did: PeerDid<Numalgo4>,
     pub their_did: Did,
     pub invitation_did: Did,
