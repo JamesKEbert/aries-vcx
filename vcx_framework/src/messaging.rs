@@ -69,14 +69,14 @@ pub struct MessageSender<W: BaseWallet> {
     did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
     connection_repository: Arc<ConnectionRepository>,
     did_repository: Arc<DidRepository>,
-    transport_manager: TransportManager,
+    transport_manager: Arc<TransportManager>,
     wallet: Arc<W>,
 }
 
 impl<W: BaseWallet> MessageSender<W> {
     pub fn new(
         did_resolver_registry: Arc<did_resolver_registry::ResolverRegistry>,
-        transport_manager: TransportManager,
+        transport_manager: Arc<TransportManager>,
         connection_repository: Arc<ConnectionRepository>,
         did_repository: Arc<DidRepository>,
         wallet: Arc<W>,
